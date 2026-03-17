@@ -1,0 +1,28 @@
+services:
+  pkm-bot:
+    build: .
+    container_name: obsidian-ai-agent
+    environment:
+      - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - VAULT_PATH=/app/vault
+      - GIT_REMOTE_NAME=${GIT_REMOTE_NAME:-origin}
+      - GIT_BRANCH=${GIT_BRANCH:-main}
+      - GIT_SYNC_DEBOUNCE_SECS=${GIT_SYNC_DEBOUNCE_SECS:-300}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS:-}
+      - RUST_LOG=${RUST_LOG:-info}
+      - USER_ID=${USER_ID:-1000}
+      - GROUP_ID=${GROUP_ID:-1000}
+    volumes:
+      # Mount your Obsidian vault
+      - ${VAULT_PATH:-./ vault}:/app/vault
+      # Mount SSH keys for git push (read-only)
+      - ${SSH_KEY_DIR:-~/.ssh}:/root/.ssh:ro
+    restart: unless-stopped
+    # Healthcheck: verify the process is running
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "obsidian-ai-agent"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
