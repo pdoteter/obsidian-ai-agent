@@ -1,0 +1,104 @@
+use std::sync::Arc;
+use teloxide::prelude::*;
+use tracing::{error, info};
+
+use crate::ai::client::OpenRouterClient;
+use crate::config::Config;
+use crate::git::debounce::SyncNotifier;
+use crate::vault::daily_note::DailyNoteManager;
+use crate::vault::writer;
+
+/// Handle incoming text messages: classify → format → write to vault
+pub async fn handle_text_message(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Config>,
+    ai_client: Arc<OpenRouterClient>,
+    vault: Arc<DailyNoteManager>,
+    sync_notifier: SyncNotifier,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let text = match msg.text() {
+        Some(t) => t.to_string(),
+        None => return Ok(()),
+    };
+
+    // Check user authorization
+    if let Some(user) = msg.from.as_ref() {
+        if !config.is_user_allowed(user.id.0) {
+            info!(user_id = user.id.0, "Unauthorized user, ignoring message");
+            return Ok(());
+        }
+    }
+
+    info!(text_length = text.len(), "Processing text message");
+
+    bot.send_message(msg.chat.id, "🔄 Processing your message...")
+        .await?;
+
+    // Classify the text with AI
+    let classified = match ai_client
+        .classify_text(&text, &config.openrouter_model_classify)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!(error = %e, "AI classification failed, using raw format");
+            // Fallback: write as raw log entry
+            let (section, content) = writer::format_raw_entry(&text);
+            vault.append_to_section(section, &content).await?;
+            bot.send_message(msg.chat.id, format!("📝 Saved as raw log entry (AI unavailable: {})", e))
+                .await?;
+            sync_notifier.notify();
+            return Ok(());
+        }
+    };
+
+    // Format and write to vault
+    let (section, content) = writer::format_for_daily_note(&classified);
+    let _path = vault.append_to_section(section, &content).await?;
+
+    // Notify git sync
+    sync_notifier.notify();
+
+    // Send confirmation
+    let tags_display = if classified.tags.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nTags: {}",
+            classified.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ")
+        )
+    };
+
+    bot.send_message(
+        msg.chat.id,
+        format!(
+            "✅ {} saved as **{}**\n_{}_{}",
+            match classified.category {
+                crate::ai::classify::NoteCategory::Todo => "📌",
+                crate::ai::classify::NoteCategory::Log => "📋",
+                crate::ai::classify::NoteCategory::Note => "📝",
+            },
+            classified.category,
+            classified.summary,
+            tags_display,
+        ),
+    )
+    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+    .await
+    .ok(); // Don't fail on formatting issues
+
+    // Send plain fallback if markdown parsing failed
+    bot.send_message(
+        msg.chat.id,
+        format!(
+            "✅ Saved as {} — {}",
+            classified.category,
+            classified.summary,
+        ),
+    )
+    .await
+    .ok();
+
+    Ok(())
+}
