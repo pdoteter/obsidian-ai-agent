@@ -15,7 +15,7 @@ pub async fn handle_text_message(
     config: Arc<Config>,
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
-    sync_notifier: SyncNotifier,
+    sync_notifier: Option<SyncNotifier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let text = match msg.text() {
         Some(t) => t.to_string(),
@@ -48,7 +48,9 @@ pub async fn handle_text_message(
             vault.append_to_section(section, &content).await?;
             bot.send_message(msg.chat.id, format!("📝 Saved as raw log entry (AI unavailable: {})", e))
                 .await?;
-            sync_notifier.notify();
+            if let Some(ref notifier) = sync_notifier {
+                notifier.notify();
+            }
             return Ok(());
         }
     };
@@ -58,7 +60,9 @@ pub async fn handle_text_message(
     let _path = vault.append_to_section(section, &content).await?;
 
     // Notify git sync
-    sync_notifier.notify();
+    if let Some(ref notifier) = sync_notifier {
+        notifier.notify();
+    }
 
     // Send confirmation
     let tags_display = if classified.tags.is_empty() {

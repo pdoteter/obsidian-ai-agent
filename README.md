@@ -28,6 +28,8 @@ docker compose up -d
 | `TELOXIDE_TOKEN` | ✅ | - | Telegram Bot API token |
 | `OPENROUTER_API_KEY` | ✅ | - | OpenRouter API key |
 | `VAULT_PATH` | ✅ | - | Pad naar Obsidian vault |
+| `GIT_SYNC_ENABLED` | ❌ | `true` | Git sync aan/uit (`false` om uit te schakelen) |
+| `GIT_PATH` | ⚠️ | - | Pad naar git repo (verplicht als git sync aan staat) |
 | `GIT_REMOTE_NAME` | ❌ | `origin` | Git remote naam |
 | `GIT_BRANCH` | ❌ | `main` | Git branch |
 | `GIT_SSH_KEY_PATH` | ❌ | auto | Pad naar SSH private key |

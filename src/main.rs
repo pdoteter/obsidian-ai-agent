@@ -64,15 +64,20 @@ async fn main() {
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
     let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone()).await);
 
-    // Initialize git sync with debouncing
-    let git_sync = Arc::new(GitSync::new(
-        config.git_path.clone(),
-        config.git_remote_name.clone(),
-        config.git_branch.clone(),
-        config.git_ssh_key_path.clone(),
-    ));
-    let sync_notifier =
-        debounce::spawn_debounced_sync(git_sync.clone(), config.git_sync_debounce_secs);
+    // Initialize git sync with debouncing (if enabled)
+    let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
+        let git_path = config.git_path.clone().expect("GIT_PATH required when git sync enabled");
+        let git_sync = Arc::new(GitSync::new(
+            git_path,
+            config.git_remote_name.clone(),
+            config.git_branch.clone(),
+            config.git_ssh_key_path.clone(),
+        ));
+        Some(debounce::spawn_debounced_sync(git_sync.clone(), config.git_sync_debounce_secs))
+    } else {
+        info!("Git sync disabled (GIT_SYNC_ENABLED=false)");
+        None
+    };
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
@@ -83,6 +88,7 @@ async fn main() {
 
     info!(
         vault_path = %config.vault_path.display(),
+        git_sync_enabled = config.git_sync_enabled,
         git_remote = %config.git_remote_name,
         git_branch = %config.git_branch,
         debounce_secs = config.git_sync_debounce_secs,
@@ -127,7 +133,7 @@ async fn handle_message(
     config: Arc<Config>,
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
-    sync_notifier: debounce::SyncNotifier,
+    sync_notifier: Option<debounce::SyncNotifier>,
 ) -> HandlerResult {
     // Route based on message content type
     if msg.voice().is_some() {

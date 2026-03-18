@@ -78,8 +78,8 @@ pub enum VaultError {
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)]
 pub enum GitError {
-    #[error("Git operation failed: {0}")]
-    Git2(#[from] git2::Error),
+    #[error("Git command failed: `{command}` — {message}")]
+    CommandFailed { command: String, message: String },
 
     #[error("Repository not found at: {0}")]
     RepoNotFound(PathBuf),

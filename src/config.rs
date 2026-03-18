@@ -6,7 +6,8 @@ pub struct Config {
     pub teloxide_token: String,
     pub openrouter_api_key: String,
     pub vault_path: PathBuf,
-    pub git_path: PathBuf,
+    pub git_sync_enabled: bool,
+    pub git_path: Option<PathBuf>,
     pub git_ssh_key_path: Option<PathBuf>,
     pub git_remote_name: String,
     pub git_branch: String,
@@ -34,9 +35,17 @@ impl Config {
             return Err(ConfigError::InvalidPath(vault_path));
         }
 
-        let git_path = env::var("GIT_PATH")
-            .map(PathBuf::from)
-            .map_err(|_| ConfigError::Missing("GIT_PATH"))?;
+        let git_sync_enabled = env::var("GIT_SYNC_ENABLED")
+            .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "0" | "no"))
+            .unwrap_or(true); // Enabled by default for backward compat
+
+        let git_path = if git_sync_enabled {
+            Some(env::var("GIT_PATH").map(PathBuf::from).map_err(|_| {
+                ConfigError::Missing("GIT_PATH (required when GIT_SYNC_ENABLED=true)")
+            })?)
+        } else {
+            env::var("GIT_PATH").ok().map(PathBuf::from)
+        };
 
         let git_ssh_key_path = env::var("GIT_SSH_KEY_PATH").ok().map(PathBuf::from);
 
@@ -68,6 +77,7 @@ impl Config {
             teloxide_token,
             openrouter_api_key,
             vault_path,
+            git_sync_enabled,
             git_path,
             git_ssh_key_path,
             git_remote_name,

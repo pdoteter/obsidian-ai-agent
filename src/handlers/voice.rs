@@ -17,7 +17,7 @@ pub async fn handle_voice_message(
     config: Arc<Config>,
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
-    sync_notifier: SyncNotifier,
+    sync_notifier: Option<SyncNotifier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Extract voice from the message
     let voice = match msg.voice() {
@@ -96,7 +96,7 @@ pub async fn handle_voice_message(
                 ),
             )
             .await?;
-            sync_notifier.notify();
+            sync_notifier.as_ref().map(|n| n.notify());
             return Ok(());
         }
     };
@@ -108,7 +108,9 @@ pub async fn handle_voice_message(
     })?;
 
     // Notify git sync
-    sync_notifier.notify();
+    if let Some(ref notifier) = sync_notifier {
+        notifier.notify();
+    }
 
     // Step 6: Send confirmation
     bot.send_message(
