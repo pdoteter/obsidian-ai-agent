@@ -6,6 +6,7 @@ pub struct Config {
     pub teloxide_token: String,
     pub openrouter_api_key: String,
     pub vault_path: PathBuf,
+    pub git_path: PathBuf,
     pub git_ssh_key_path: Option<PathBuf>,
     pub git_remote_name: String,
     pub git_branch: String,
@@ -32,6 +33,10 @@ impl Config {
         if !vault_path.exists() {
             return Err(ConfigError::InvalidPath(vault_path));
         }
+
+        let git_path = env::var("GIT_PATH")
+            .map(PathBuf::from)
+            .map_err(|_| ConfigError::Missing("GIT_PATH"))?;
 
         let git_ssh_key_path = env::var("GIT_SSH_KEY_PATH").ok().map(PathBuf::from);
 
@@ -63,6 +68,7 @@ impl Config {
             teloxide_token,
             openrouter_api_key,
             vault_path,
+            git_path,
             git_ssh_key_path,
             git_remote_name,
             git_branch,

@@ -61,20 +61,18 @@ async fn main() {
         }
     };
 
-    // Initialize vault manager
-    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone()));
+    // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
+    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone()).await);
 
     // Initialize git sync with debouncing
     let git_sync = Arc::new(GitSync::new(
-        config.vault_path.clone(),
+        config.git_path.clone(),
         config.git_remote_name.clone(),
         config.git_branch.clone(),
         config.git_ssh_key_path.clone(),
     ));
-    let sync_notifier = debounce::spawn_debounced_sync(
-        git_sync.clone(),
-        config.git_sync_debounce_secs,
-    );
+    let sync_notifier =
+        debounce::spawn_debounced_sync(git_sync.clone(), config.git_sync_debounce_secs);
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
@@ -106,9 +104,7 @@ async fn main() {
         .default_handler(|upd| async move {
             warn!(update_id = upd.id.0, "Unhandled update");
         })
-        .error_handler(LoggingErrorHandler::with_custom_text(
-            "Error in handler",
-        ))
+        .error_handler(LoggingErrorHandler::with_custom_text("Error in handler"))
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -135,25 +131,10 @@ async fn handle_message(
 ) -> HandlerResult {
     // Route based on message content type
     if msg.voice().is_some() {
-        handlers::voice::handle_voice_message(
-            bot,
-            msg,
-            config,
-            ai_client,
-            vault,
-            sync_notifier,
-        )
-        .await
+        handlers::voice::handle_voice_message(bot, msg, config, ai_client, vault, sync_notifier)
+            .await
     } else if msg.text().is_some() {
-        handlers::text::handle_text_message(
-            bot,
-            msg,
-            config,
-            ai_client,
-            vault,
-            sync_notifier,
-        )
-        .await
+        handlers::text::handle_text_message(bot, msg, config, ai_client, vault, sync_notifier).await
     } else {
         bot.send_message(
             msg.chat.id,
