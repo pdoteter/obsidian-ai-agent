@@ -40,3 +40,30 @@ docker compose up -d
 | `OPENROUTER_MODEL_CLASSIFY` | ❌ | `google/gemini-2.5-flash` | Model for classification |
 | `ALLOWED_USER_IDS` | ❌ | all | Comma-separated Telegram user IDs |
 | `RUST_LOG` | ❌ | `info` | Log level |
+
+## Model Recommendations
+
+### Transcription (`WHISPER_MODEL`)
+
+These models are available via the OpenAI `/v1/audio/transcriptions` endpoint:
+
+| Model | Quality | Speed | Cost | Notes |
+|-------|---------|-------|------|-------|
+| `gpt-4o-mini-transcribe` | Near-best accuracy | Fast | ~$0.003/min | **Recommended default** — cheaper and more accurate than `whisper-1` |
+| `gpt-4o-transcribe` | Best accuracy | Slower | ~$0.006/min | Best choice when accuracy matters most |
+| `whisper-1` | Good baseline | Fast | ~$0.006/min | Legacy model, can misdetect language (e.g. Dutch → German) |
+
+**Tip:** If you primarily send voice messages in a single language, set `WHISPER_LANGUAGE` to avoid misdetection (e.g. `nl` for Dutch, `en` for English).
+
+### Classification (`OPENROUTER_MODEL_CLASSIFY`)
+
+These models are available via [OpenRouter](https://openrouter.ai/models). Classification is a lightweight task, so fast/cheap models work well:
+
+| Model | Input $/M tokens | Notes |
+|-------|-------------------|-------|
+| `google/gemini-2.5-flash` | $0.30 | **Current default** — good balance of speed, quality, and cost |
+| `google/gemini-2.0-flash-lite-001` | $0.25 | Cheaper alternative, 2.5× faster time-to-first-token |
+| `anthropic/claude-haiku-3.5` | $1.00 | Higher quality instruction following, more expensive |
+| `deepseek/deepseek-chat-v3-0324` | $0.27 | Near-frontier quality at low cost |
+
+For classification tasks (short input, structured output), the default `google/gemini-2.5-flash` is a solid choice. Switch to a cheaper model if you process high volumes, or a more capable model if classification accuracy is critical.
