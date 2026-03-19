@@ -1,7 +1,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::error::AiError;
 
@@ -14,6 +14,7 @@ pub struct WhisperClient {
     http: Client,
     api_key: String,
     model: String,
+    language: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -22,7 +23,7 @@ struct WhisperResponse {
 }
 
 impl WhisperClient {
-    pub fn new(api_key: String, model: String) -> Result<Self, AiError> {
+    pub fn new(api_key: String, model: String, language: Option<String>) -> Result<Self, AiError> {
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()?;
@@ -31,6 +32,7 @@ impl WhisperClient {
             http,
             api_key,
             model,
+            language,
         })
     }
 
@@ -39,6 +41,7 @@ impl WhisperClient {
         info!(
             audio_size_bytes = audio_bytes.len(),
             model = %self.model,
+            language = ?self.language,
             "Sending audio to Whisper API"
         );
 
@@ -47,10 +50,14 @@ impl WhisperClient {
             .mime_str("audio/ogg")
             .map_err(|e| AiError::TranscriptionFailed(format!("Failed to build multipart: {}", e)))?;
 
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .text("model", self.model.clone())
             .text("response_format", "json")
             .part("file", file_part);
+
+        if let Some(ref lang) = self.language {
+            form = form.text("language", lang.clone());
+        }
 
         let response = self
             .http
@@ -83,8 +90,10 @@ impl WhisperClient {
 
         info!(
             transcript_length = transcript.len(),
+            language = ?self.language,
             "Whisper transcription complete"
         );
+        debug!(transcript = %transcript, "Transcription result");
 
         Ok(transcript)
     }

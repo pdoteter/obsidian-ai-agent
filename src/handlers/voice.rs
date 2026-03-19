@@ -2,7 +2,7 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::ChatAction;
 
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::ai::client::OpenRouterClient;
 use crate::ai::transcribe::WhisperClient;
@@ -67,6 +67,7 @@ pub async fn handle_voice_message(
     };
 
     info!(transcript_length = transcript.len(), "Transcription complete");
+    debug!(transcript = %transcript, "Full transcript");
 
     // Step 3: Classify the transcribed text
     let classified = match ai_client
