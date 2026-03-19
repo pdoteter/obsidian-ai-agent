@@ -3,11 +3,10 @@
 # ============================================
 FROM rust:1.85-bookworm AS builder
 
-# Install build dependencies for libgit2 and openssl
+# Install build dependencies for openssl
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
-    libgit2-dev \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,9 +33,8 @@ FROM debian:bookworm-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    ffmpeg \
+    git \
     libssl3 \
-    libgit2-1.5 \
     ca-certificates \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
