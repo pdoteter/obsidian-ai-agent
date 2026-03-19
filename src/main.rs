@@ -24,6 +24,9 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
 async fn main() {
+    // Load .env file before anything reads env vars
+    let _ = dotenvy::dotenv();
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -58,6 +61,7 @@ async fn main() {
     let whisper_client = match WhisperClient::new(
         config.openai_api_key.clone(),
         config.whisper_model.clone(),
+        config.whisper_language.clone(),
     ) {
         Ok(c) => Arc::new(c),
         Err(e) => {

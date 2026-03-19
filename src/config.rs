@@ -14,14 +14,13 @@ pub struct Config {
     pub git_branch: String,
     pub git_sync_debounce_secs: u64,
     pub whisper_model: String,
+    pub whisper_language: Option<String>,
     pub openrouter_model_classify: String,
     pub allowed_user_ids: Vec<u64>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let _ = dotenvy::dotenv();
-
         let teloxide_token =
             env::var("TELOXIDE_TOKEN").map_err(|_| ConfigError::Missing("TELOXIDE_TOKEN"))?;
 
@@ -64,6 +63,8 @@ impl Config {
 
         let whisper_model = env::var("WHISPER_MODEL").unwrap_or_else(|_| "whisper-1".to_string());
 
+        let whisper_language = env::var("WHISPER_LANGUAGE").ok().filter(|v| !v.is_empty());
+
         let openrouter_model_classify = env::var("OPENROUTER_MODEL_CLASSIFY")
             .unwrap_or_else(|_| "google/gemini-2.5-flash".to_string());
 
@@ -88,6 +89,7 @@ impl Config {
             git_branch,
             git_sync_debounce_secs,
             whisper_model,
+            whisper_language,
             openrouter_model_classify,
             allowed_user_ids,
         })
