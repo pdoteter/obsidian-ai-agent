@@ -28,12 +28,6 @@ pub enum AudioError {
     #[error("Failed to download file from Telegram: {0}")]
     Download(String),
 
-    #[error("Failed to convert audio with ffmpeg: {0}")]
-    Conversion(String),
-
-    #[error("ffmpeg not found in PATH")]
-    FfmpegNotFound,
-
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

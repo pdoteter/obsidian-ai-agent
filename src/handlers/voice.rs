@@ -1,21 +1,24 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
+use teloxide::types::ChatAction;
 
 use tracing::{error, info};
 
 use crate::ai::client::OpenRouterClient;
-use crate::audio::{convert, download};
+use crate::ai::transcribe::WhisperClient;
+use crate::audio::download;
 use crate::config::Config;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
 
-/// Handle incoming voice messages: download → convert → transcribe → classify → write to vault
+/// Handle incoming voice messages: download → transcribe (Whisper) → classify → write to vault
 pub async fn handle_voice_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
     ai_client: Arc<OpenRouterClient>,
+    whisper_client: Arc<WhisperClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -39,29 +42,18 @@ pub async fn handle_voice_message(
         "Processing voice message"
     );
 
-    bot.send_message(msg.chat.id, "🎙️ Processing your voice message...")
-        .await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
-    // Step 1: Download the voice file
-    let (oga_path, _tmp_dir) = download::download_voice(&bot, &voice).await.map_err(|e| {
+    // Step 1: Download voice to memory (Ogg Opus bytes)
+    let audio_bytes = download::download_voice_to_memory(&bot, &voice).await.map_err(|e| {
         error!(error = %e, "Failed to download voice message");
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
 
-    // Step 2: Convert .oga to .wav
-    let wav_path = convert::convert_oga_to_wav(&oga_path).await.map_err(|e| {
-        error!(error = %e, "Failed to convert audio");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    // Step 2: Transcribe via OpenAI Whisper (accepts .oga natively, no ffmpeg needed)
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
-    // Step 3: Transcribe the audio
-    bot.send_message(msg.chat.id, "🔊 Transcribing audio...")
-        .await?;
-
-    let transcript = match ai_client
-        .transcribe_audio(&wav_path, &config.openrouter_model_transcribe)
-        .await
-    {
+    let transcript = match whisper_client.transcribe(&audio_bytes).await {
         Ok(t) => t,
         Err(e) => {
             error!(error = %e, "Transcription failed");
@@ -76,7 +68,7 @@ pub async fn handle_voice_message(
 
     info!(transcript_length = transcript.len(), "Transcription complete");
 
-    // Step 4: Classify the transcribed text
+    // Step 3: Classify the transcribed text
     let classified = match ai_client
         .classify_text(&transcript, &config.openrouter_model_classify)
         .await
@@ -101,7 +93,7 @@ pub async fn handle_voice_message(
         }
     };
 
-    // Step 5: Write to vault
+    // Step 4: Write to vault
     let (section, content) = writer::format_for_daily_note(&classified);
     vault.append_to_section(section, &content).await.map_err(|e| {
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
@@ -112,7 +104,7 @@ pub async fn handle_voice_message(
         notifier.notify();
     }
 
-    // Step 6: Send confirmation
+    // Step 5: Send confirmation
     bot.send_message(
         msg.chat.id,
         format!(

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub teloxide_token: String,
     pub openrouter_api_key: String,
+    pub openai_api_key: String,
     pub vault_path: PathBuf,
     pub git_sync_enabled: bool,
     pub git_path: Option<PathBuf>,
@@ -12,7 +13,7 @@ pub struct Config {
     pub git_remote_name: String,
     pub git_branch: String,
     pub git_sync_debounce_secs: u64,
-    pub openrouter_model_transcribe: String,
+    pub whisper_model: String,
     pub openrouter_model_classify: String,
     pub allowed_user_ids: Vec<u64>,
 }
@@ -58,8 +59,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(300); // 5 minutes default
 
-        let openrouter_model_transcribe = env::var("OPENROUTER_MODEL_TRANSCRIBE")
-            .unwrap_or_else(|_| "google/gemini-2.5-flash".to_string());
+        let openai_api_key =
+            env::var("OPENAI_API_KEY").map_err(|_| ConfigError::Missing("OPENAI_API_KEY"))?;
+
+        let whisper_model = env::var("WHISPER_MODEL").unwrap_or_else(|_| "whisper-1".to_string());
 
         let openrouter_model_classify = env::var("OPENROUTER_MODEL_CLASSIFY")
             .unwrap_or_else(|_| "google/gemini-2.5-flash".to_string());
@@ -76,6 +79,7 @@ impl Config {
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
+            openai_api_key,
             vault_path,
             git_sync_enabled,
             git_path,
@@ -83,7 +87,7 @@ impl Config {
             git_remote_name,
             git_branch,
             git_sync_debounce_secs,
-            openrouter_model_transcribe,
+            whisper_model,
             openrouter_model_classify,
             allowed_user_ids,
         })

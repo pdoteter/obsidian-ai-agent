@@ -8,6 +8,7 @@ use crate::error::AudioError;
 
 /// Downloads a voice message from Telegram to a temporary file.
 /// Returns the path to the downloaded .oga file and the temp directory (must stay alive).
+#[allow(dead_code)]
 pub async fn download_voice(
     bot: &Bot,
     voice: &Voice,

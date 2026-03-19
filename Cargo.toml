@@ -30,9 +30,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Environment variables
 dotenvy = "0.15"
 
-# Base64 encoding (for audio data)
-base64 = "0.22"
-
 # Temporary files (for audio processing)
 tempfile = "3"
 

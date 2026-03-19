@@ -13,6 +13,7 @@ use teloxide::prelude::*;
 use tracing::{error, info, warn};
 
 use ai::client::OpenRouterClient;
+use ai::transcribe::WhisperClient;
 use config::Config;
 use git::conflict;
 use git::debounce;
@@ -44,19 +45,23 @@ async fn main() {
         }
     };
 
-    // Check ffmpeg availability
-    match audio::convert::check_ffmpeg().await {
-        Ok(()) => info!("ffmpeg is available"),
-        Err(e) => {
-            warn!(error = %e, "ffmpeg not found — voice messages will not work");
-        }
-    }
-
-    // Initialize OpenRouter client
+    // Initialize OpenRouter client (for classification)
     let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
         Ok(c) => Arc::new(c),
         Err(e) => {
             error!(error = %e, "Failed to create OpenRouter client");
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize Whisper client (for voice transcription)
+    let whisper_client = match WhisperClient::new(
+        config.openai_api_key.clone(),
+        config.whisper_model.clone(),
+    ) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            error!(error = %e, "Failed to create Whisper client");
             std::process::exit(1);
         }
     };
@@ -103,6 +108,7 @@ async fn main() {
         .dependencies(dptree::deps![
             config.clone(),
             ai_client.clone(),
+            whisper_client.clone(),
             vault.clone(),
             sync_notifier.clone(),
             conflict_pending.clone()
@@ -132,12 +138,13 @@ async fn handle_message(
     msg: Message,
     config: Arc<Config>,
     ai_client: Arc<OpenRouterClient>,
+    whisper_client: Arc<WhisperClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
 ) -> HandlerResult {
     // Route based on message content type
     if msg.voice().is_some() {
-        handlers::voice::handle_voice_message(bot, msg, config, ai_client, vault, sync_notifier)
+        handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier)
             .await
     } else if msg.text().is_some() {
         handlers::text::handle_text_message(bot, msg, config, ai_client, vault, sync_notifier).await

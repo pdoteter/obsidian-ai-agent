@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
+use teloxide::types::ChatAction;
 use tracing::{error, info};
 
 use crate::ai::client::OpenRouterClient;
@@ -32,8 +33,7 @@ pub async fn handle_text_message(
 
     info!(text_length = text.len(), "Processing text message");
 
-    bot.send_message(msg.chat.id, "🔄 Processing your message...")
-        .await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
     // Classify the text with AI
     let classified = match ai_client
