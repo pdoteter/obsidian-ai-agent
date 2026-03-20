@@ -48,13 +48,16 @@ su -s /bin/sh botuser -c "git config --global --add safe.directory /app/vault"
 
 # Auto-convert HTTPS remote URLs to SSH when SSH keys are available
 # Fixes: "could not read Username for 'https://github.com'" in non-interactive containers
+# Converts both fetch and push URLs (git remotes can have separate push URLs)
 if [ -d "/tmp/.ssh-host" ] && [ -d "/app/vault/.git" ]; then
-    REMOTE_URL=$(git -C /app/vault remote get-url origin 2>/dev/null || true)
-    if echo "$REMOTE_URL" | grep -q '^https://github\.com/'; then
-        SSH_URL=$(echo "$REMOTE_URL" | sed 's|^https://github\.com/|git@github.com:|')
-        echo "Converting remote URL from HTTPS to SSH: $SSH_URL"
-        git -C /app/vault remote set-url origin "$SSH_URL"
-    fi
+    for URL_FLAG in "" "--push"; do
+        REMOTE_URL=$(git -C /app/vault remote get-url $URL_FLAG origin 2>/dev/null || true)
+        if echo "$REMOTE_URL" | grep -q '^https://github\.com/'; then
+            SSH_URL=$(echo "$REMOTE_URL" | sed 's|^https://github\.com/|git@github.com:|')
+            echo "Converting remote ${URL_FLAG:-fetch} URL to SSH: $SSH_URL"
+            git -C /app/vault remote set-url $URL_FLAG origin "$SSH_URL"
+        fi
+    done
 fi
 
 # Run as botuser via su, falling back to direct exec
