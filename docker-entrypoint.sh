@@ -29,5 +29,8 @@ else
     echo "No SSH keys mounted at /tmp/.ssh-host — git push over SSH will not work"
 fi
 
+# Mark vault as safe directory (ownership differs between mount and botuser)
+git config --global --add safe.directory /app/vault
+
 # Run as botuser via su, falling back to direct exec
 exec su -s /bin/sh botuser -c "exec $*" 2>/dev/null || exec "$@"
