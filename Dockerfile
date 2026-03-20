@@ -57,7 +57,7 @@ ENV GIT_SYNC_DEBOUNCE_SECS=300
 
 # Entrypoint script for UID/GID mapping
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/obsidian-ai-agent"]
