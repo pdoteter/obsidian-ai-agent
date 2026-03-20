@@ -2,33 +2,16 @@ services:
   pkm-bot:
     build: .
     container_name: obsidian-ai-agent
-    environment:
-      - TELOXIDE_TOKEN=${TELOXIDE_TOKEN}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - VAULT_PATH=/app/vault
-      - GIT_SYNC_ENABLED=${GIT_SYNC_ENABLED:-true}
-      - GIT_PATH=${GIT_PATH:-/app/vault}
-      - GIT_REMOTE_NAME=${GIT_REMOTE_NAME:-origin}
-      - GIT_BRANCH=${GIT_BRANCH:-main}
-      - GIT_SSH_KEY_PATH=${GIT_SSH_KEY_PATH:-}
-      - GIT_SYNC_DEBOUNCE_SECS=${GIT_SYNC_DEBOUNCE_SECS:-300}
-      - WHISPER_MODEL=${WHISPER_MODEL:-whisper-1}
-      - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-}
-      - OPENROUTER_MODEL_CLASSIFY=${OPENROUTER_MODEL_CLASSIFY:-google/gemini-2.5-flash}
-      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS:-}
-      - RUST_LOG=${RUST_LOG:-info}
-      - USER_ID=${USER_ID:-1000}
-      - GROUP_ID=${GROUP_ID:-1000}
+    env_file:
+      - .env.docker
     volumes:
-      # Mount your Obsidian vault
-      - ${VAULT_PATH:-./ vault}:/app/vault
-      # Mount SSH keys for git push (read-only)
-      - ${SSH_KEY_DIR:-~/.ssh}:/root/.ssh:ro
+      # Mount your Obsidian vault (HOST_VAULT_PATH from .env.docker)
+      - ${HOST_VAULT_PATH:-./.vault}:/app/vault
+      # Mount SSH keys read-only; entrypoint copies them to /home/botuser/.ssh
+      - ${HOST_SSH_DIR:-~/.ssh}:/tmp/.ssh-host:ro
     restart: unless-stopped
-    # Healthcheck: verify the process is running
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "obsidian-ai-agent"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 30s
       timeout: 10s
       retries: 3
