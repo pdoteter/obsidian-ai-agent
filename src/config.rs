@@ -17,6 +17,7 @@ pub struct Config {
     pub whisper_language: Option<String>,
     pub openrouter_model_classify: String,
     pub allowed_user_ids: Vec<u64>,
+    pub timezone: String,
 }
 
 impl Config {
@@ -77,6 +78,10 @@ impl Config {
             })
             .unwrap_or_default();
 
+        // Read TZ and set it as env var so chrono::Local uses the correct timezone
+        let timezone = env::var("TZ").unwrap_or_else(|_| "Europe/Brussels".to_string());
+        env::set_var("TZ", &timezone);
+
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
@@ -92,6 +97,7 @@ impl Config {
             whisper_language,
             openrouter_model_classify,
             allowed_user_ids,
+            timezone,
         })
     }
 

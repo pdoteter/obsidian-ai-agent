@@ -101,6 +101,7 @@ async fn main() {
         git_remote = %config.git_remote_name,
         git_branch = %config.git_branch,
         debounce_secs = config.git_sync_debounce_secs,
+        timezone = %config.timezone,
         allowed_users = ?config.allowed_user_ids,
         "Bot configured"
     );
