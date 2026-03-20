@@ -73,7 +73,7 @@ impl OpenRouterClient {
                             },
                             "markdown": {
                                 "type": "string",
-                                "description": "The formatted markdown content. For todos: use '- [ ] ' prefix. For logs: use '- HH:MM — ' prefix with the current time context. For notes: use a clean paragraph or bullet points."
+                                "description": "The formatted markdown content. For todos: use '- [ ] ' prefix. For logs: use '- <activity description>' (do NOT include time — it will be added automatically). For notes: use a clean paragraph or bullet points."
                             },
                             "tags": {
                                 "type": "array",
@@ -123,7 +123,7 @@ const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge manag
 - Example output: `- [ ] Melk kopen`
 
 **log** — Activities, events, things that happened or are happening
-- Format: `- <time if available> — <activity description>`
+- Format: `- <activity description>` (do NOT include time — it is added automatically)
 - Example input: "Net 30 minuten hardgelopen in het park"
 - Example output: `- 30 min hardgelopen in het park 🏃`
 
@@ -138,5 +138,5 @@ const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge manag
 - Extract relevant tags (without # prefix)
 - The markdown should be ready to append directly to a daily note
 - For todos, always use `- [ ] ` checkbox format
-- For logs, include time context if mentioned
+- For logs, do NOT include time — timestamps are added automatically by the system
 "#;

@@ -18,7 +18,10 @@ pub fn format_for_daily_note(note: &ClassifiedNote) -> (&'static str, String) {
             ("## ✅ Todos", content)
         }
         NoteCategory::Log => {
-            let content = format!("{}{}", note.markdown, tags_str);
+            let time = Local::now().format("%H:%M").to_string();
+            // Strip leading "- " from AI markdown to rebuild with timestamp
+            let entry_text = note.markdown.trim_start_matches("- ").trim();
+            let content = format!("- {} — {}{}", time, entry_text, tags_str);
             ("## 📋 Log", content)
         }
         NoteCategory::Note => {
@@ -59,13 +62,47 @@ mod tests {
     fn test_format_log() {
         let note = ClassifiedNote {
             category: NoteCategory::Log,
-            markdown: "- 14:00 — Team meeting".to_string(),
+            markdown: "- Team meeting".to_string(),
             tags: vec!["work".to_string()],
             summary: "Team meeting".to_string(),
         };
 
         let (section, content) = format_for_daily_note(&note);
         assert_eq!(section, "## 📋 Log");
-        assert!(content.contains("Team meeting"));
+        // Should have format: "- HH:MM — Team meeting #work"
+        assert!(content.starts_with("- "));
+        assert!(content.contains(" — Team meeting"));
+        assert!(content.contains("#work"));
+    }
+
+    #[test]
+    fn test_format_log_with_timestamp() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Log,
+            markdown: "- Went for a run".to_string(),
+            tags: vec![],
+            summary: "Running".to_string(),
+        };
+
+        let (section, content) = format_for_daily_note(&note);
+        assert_eq!(section, "## 📋 Log");
+        // Verify format: "- HH:MM — Went for a run"
+        assert!(
+            content.starts_with("- "),
+            "Should start with '- ', got: {}",
+            content
+        );
+        assert!(
+            content.contains(" — Went for a run"),
+            "Should contain ' — Went for a run', got: {}",
+            content
+        );
+        // Verify the time part is 5 chars (HH:MM) after "- "
+        let after_dash = &content[2..7];
+        assert!(
+            after_dash.contains(':'),
+            "Should have HH:MM format, got: {}",
+            after_dash
+        );
     }
 }
