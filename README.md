@@ -39,6 +39,7 @@ docker compose up -d
 | `WHISPER_LANGUAGE` | ❌ | - | ISO-639-1 language code for Whisper (e.g. `nl`, `en`, `de`) |
 | `OPENROUTER_MODEL_CLASSIFY` | ❌ | `google/gemini-2.5-flash` | Model for classification |
 | `ALLOWED_USER_IDS` | ❌ | all | Comma-separated Telegram user IDs |
+| `TZ` | ❌ | `Europe/Brussels` | Timezone for timestamps in daily notes (IANA format, e.g. `America/New_York`) |
 | `RUST_LOG` | ❌ | `info` | Log level |
 
 ## Model Recommendations

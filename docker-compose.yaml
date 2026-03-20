@@ -4,6 +4,8 @@ services:
     container_name: obsidian-ai-agent
     env_file:
       - .env.docker
+    environment:
+      - TZ=${TZ:-Europe/Brussels}
     volumes:
       # Mount your Obsidian vault (HOST_VAULT_PATH from .env.docker)
       - ${HOST_VAULT_PATH:-./.vault}:/app/vault
