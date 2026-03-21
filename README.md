@@ -17,9 +17,24 @@ Telegram bot that converts text and voice messages into structured Obsidian dail
 
 ## Docker
 
+Pre-built images are available on [Docker Hub](https://hub.docker.com/r/peterluxem/obsidian-ai-agent):
+
 ```bash
 docker compose up -d
 ```
+
+Images are automatically built and pushed on every commit to `main`.
+
+To build locally instead, uncomment `build: .` in `docker-compose.yaml`.
+
+### CI/CD Setup (GitHub Actions)
+
+The workflow at `.github/workflows/docker.yml` builds and pushes to Docker Hub. Add these secrets to your GitHub repo (`Settings > Secrets > Actions`):
+
+| Secret | Value |
+|--------|-------|
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
 
 ## Environment Variables
 
