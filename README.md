@@ -11,15 +11,18 @@ Telegram bot that converts text and voice messages into structured Obsidian dail
 
 ## Setup
 
-1. Copy `.env.example` to `.env` and fill in the values
-2. `cargo build --release`
-3. `./target/release/obsidian-ai-agent`
+1. Copy `.env.example` to `.env` and fill in your API keys
+2. Copy `config.yaml.example` to `config.yaml` and adjust settings
+3. `cargo build --release`
+4. `./target/release/obsidian-ai-agent`
 
 ## Docker
 
 Pre-built images are available on [Docker Hub](https://hub.docker.com/r/peterluxem/obsidian-ai-agent):
 
 ```bash
+cp .env.docker.example .env.docker                # Fill in API keys
+cp config.docker.yaml.example config.docker.yaml   # Adjust settings
 docker compose up -d
 ```
 
@@ -36,30 +39,50 @@ The workflow at `.github/workflows/docker.yml` builds and pushes to Docker Hub. 
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
 
-## Environment Variables
+## Configuration
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `TELOXIDE_TOKEN` | ✅ | - | Telegram Bot API token |
-| `OPENROUTER_API_KEY` | ✅ | - | OpenRouter API key (classification) |
-| `OPENAI_API_KEY` | ✅ | - | OpenAI API key (Whisper transcription) |
-| `VAULT_PATH` | ✅ | - | Path to Obsidian vault |
-| `GIT_SYNC_ENABLED` | ❌ | `true` | Enable/disable git sync (`false` to disable) |
-| `GIT_PATH` | ⚠️ | - | Path to git repo (required when git sync is enabled) |
-| `GIT_REMOTE_NAME` | ❌ | `origin` | Git remote name |
-| `GIT_BRANCH` | ❌ | `main` | Git branch |
-| `GIT_SSH_KEY_PATH` | ❌ | auto | Path to SSH private key |
-| `GIT_SYNC_DEBOUNCE_SECS` | ❌ | `300` | Seconds to wait before git sync |
-| `WHISPER_MODEL` | ❌ | `whisper-1` | OpenAI Whisper model for transcription |
-| `WHISPER_LANGUAGE` | ❌ | - | ISO-639-1 language code for Whisper (e.g. `nl`, `en`, `de`) |
-| `OPENROUTER_MODEL_CLASSIFY` | ❌ | `google/gemini-2.5-flash` | Model for classification |
-| `ALLOWED_USER_IDS` | ❌ | all | Comma-separated Telegram user IDs |
-| `TZ` | ❌ | `Europe/Brussels` | Timezone for timestamps in daily notes (IANA format, e.g. `America/New_York`) |
-| `RUST_LOG` | ❌ | `info` | Log level |
+Configuration is split into two files:
+
+- **`.env`** — API keys and secrets only
+- **`config.yaml`** — All other settings (paths, models, git, timezone, etc.)
+
+### API Keys (`.env`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TELOXIDE_TOKEN` | ✅ | Telegram Bot API token |
+| `OPENROUTER_API_KEY` | ✅ | OpenRouter API key (classification) |
+| `OPENAI_API_KEY` | ✅ | OpenAI API key (Whisper transcription) |
+| `CONFIG_PATH` | ❌ | Path to config file (default: `./config.yaml`) |
+
+### Settings (`config.yaml`)
+
+```yaml
+vault_path: /path/to/your/obsidian/vault
+
+git:
+  sync_enabled: true                        # default: true
+  path: /path/to/your/git-root-path         # required when sync_enabled is true
+  remote_name: origin                       # default: origin
+  branch: main                              # default: main
+  ssh_key_path:                             # default: auto-detect
+  sync_debounce_secs: 300                   # default: 300
+
+ai:
+  whisper_model: whisper-1                  # default: whisper-1
+  whisper_language: nl                      # optional, ISO-639-1
+  classify_model: google/gemini-2.5-flash   # default: google/gemini-2.5-flash
+
+access:
+  allowed_user_ids: []                      # default: [] (allow all)
+
+timezone: Europe/Brussels                   # default: Europe/Brussels
+log_level: info                             # default: info
+```
 
 ## Model Recommendations
 
-### Transcription (`WHISPER_MODEL`)
+### Transcription (`ai.whisper_model`)
 
 These models are available via the OpenAI `/v1/audio/transcriptions` endpoint:
 
@@ -69,9 +92,9 @@ These models are available via the OpenAI `/v1/audio/transcriptions` endpoint:
 | `gpt-4o-transcribe` | Best accuracy | Slower | ~$0.006/min | Best choice when accuracy matters most |
 | `whisper-1` | Good baseline | Fast | ~$0.006/min | Legacy model, can misdetect language (e.g. Dutch → German) |
 
-**Tip:** If you primarily send voice messages in a single language, set `WHISPER_LANGUAGE` to avoid misdetection (e.g. `nl` for Dutch, `en` for English).
+**Tip:** If you primarily send voice messages in a single language, set `ai.whisper_language` to avoid misdetection (e.g. `nl` for Dutch, `en` for English).
 
-### Classification (`OPENROUTER_MODEL_CLASSIFY`)
+### Classification (`ai.classify_model`)
 
 These models are available via [OpenRouter](https://openrouter.ai/models). Classification is a lightweight task, so fast/cheap models work well:
 

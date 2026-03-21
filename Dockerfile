@@ -51,9 +51,8 @@ COPY --from=builder /app/target/release/obsidian-ai-agent /app/obsidian-ai-agent
 RUN mkdir -p /app/vault && chown -R botuser:botuser /app
 
 # Default environment variables
-ENV VAULT_PATH=/app/vault
+ENV CONFIG_PATH=/app/config.yaml
 ENV RUST_LOG=info
-ENV GIT_SYNC_DEBOUNCE_SECS=300
 
 # Entrypoint script for UID/GID mapping
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh

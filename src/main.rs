@@ -24,10 +24,20 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
 async fn main() {
-    // Load .env file before anything reads env vars
+    // Load .env file for API keys
     let _ = dotenvy::dotenv();
 
-    // Initialize tracing
+    // Load configuration from YAML file + env secrets
+    // Done before tracing init so log_level from config is available
+    let config = match Config::load() {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            eprintln!("Failed to load configuration: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize tracing (RUST_LOG set by Config::load from config.yaml)
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -38,15 +48,6 @@ async fn main() {
         .init();
 
     info!("Starting Obsidian AI Agent...");
-
-    // Load configuration
-    let config = match Config::from_env() {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            error!(error = %e, "Failed to load configuration");
-            std::process::exit(1);
-        }
-    };
 
     // Initialize OpenRouter client (for classification)
     let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {

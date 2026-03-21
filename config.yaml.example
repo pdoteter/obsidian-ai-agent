@@ -1,0 +1,31 @@
+# Obsidian AI Agent — Configuration
+# Copy this file to config.yaml and adjust the values.
+# API keys are NOT stored here — they go in .env
+
+# Path to your Obsidian vault
+vault_path: /path/to/your/obsidian/vault
+
+# Git sync settings (optional — omit the git section entirely to use defaults)
+git:
+  sync_enabled: true
+  path: /path/to/your/git-root-path      # Required when sync_enabled is true
+  remote_name: origin
+  branch: main
+  ssh_key_path:                           # Leave empty for auto-detection
+  sync_debounce_secs: 300                 # Seconds to wait before syncing
+
+# AI model settings (optional — defaults shown)
+ai:
+  whisper_model: whisper-1                # OpenAI Whisper model for transcription
+  whisper_language: nl                    # ISO-639-1 language code (e.g. nl, en, de)
+  classify_model: google/gemini-2.5-flash # OpenRouter model for classification
+
+# Access control (optional — empty list allows all users)
+access:
+  allowed_user_ids: []                    # Comma-separated Telegram user IDs, e.g. [123456, 789012]
+
+# Timezone for timestamps in daily notes (IANA format)
+timezone: Europe/Brussels
+
+# Log level (trace, debug, info, warn, error)
+log_level: info

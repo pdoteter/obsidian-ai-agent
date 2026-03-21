@@ -1,0 +1,31 @@
+# Obsidian AI Agent — Docker Configuration
+# Copy this file to config.docker.yaml and adjust the values.
+# These paths are CONTAINER-INTERNAL (not your host paths).
+# API keys go in .env.docker, NOT here.
+
+# Obsidian Vault (container-internal paths)
+# HOST_VAULT_PATH (in .env) mounts the git repo root at /app/vault
+# Set vault_path to the vault subdirectory within the git repo
+# Example: if your git repo is ~/obsidian and vault is ~/obsidian/MyVault
+#   .env:              HOST_VAULT_PATH=~/obsidian
+#   config.docker.yaml: vault_path: /app/vault/MyVault
+vault_path: /app/vault/MyVault
+
+git:
+  sync_enabled: true
+  path: /app/vault
+  remote_name: origin
+  branch: main
+  ssh_key_path: /home/botuser/.ssh/id_rsa
+  sync_debounce_secs: 300
+
+ai:
+  whisper_model: whisper-1
+  whisper_language: nl
+  classify_model: google/gemini-2.5-flash
+
+access:
+  allowed_user_ids: []
+
+timezone: Europe/Brussels
+log_level: info

@@ -27,8 +27,11 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-# Environment variables
+# Environment variables (secrets only)
 dotenvy = "0.15"
+
+# YAML config file
+serde_yml = "0.0.12"
 
 # Temporary files (for audio processing)
 tempfile = "3"

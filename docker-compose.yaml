@@ -7,9 +7,12 @@ services:
       - .env.docker
     environment:
       - TZ=${TZ:-Europe/Brussels}
+      - CONFIG_PATH=/app/config.yaml
     volumes:
-      # Mount your Obsidian vault (HOST_VAULT_PATH from .env.docker)
+      # Mount your Obsidian vault (HOST_VAULT_PATH from .env)
       - ${HOST_VAULT_PATH:-./.vault}:/app/vault
+      # Mount config file into the container
+      - ${HOST_CONFIG_PATH:-./config.docker.yaml}:/app/config.yaml:ro
       # Mount SSH keys read-only; entrypoint copies them to /home/botuser/.ssh
       - ${HOST_SSH_DIR:-~/.ssh}:/tmp/.ssh-host:ro
     restart: unless-stopped
