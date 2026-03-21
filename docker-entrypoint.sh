@@ -1,12 +1,15 @@
 #!/bin/bash
 set -e
 
-# If USER_ID and GROUP_ID are set, update the botuser to match the host user
-# This prevents permission issues with the vault volume
-if [ -n "$USER_ID" ] && [ -n "$GROUP_ID" ]; then
-    echo "Adjusting UID/GID to ${USER_ID}:${GROUP_ID}"
-    groupmod -g "$GROUP_ID" botuser 2>/dev/null || true
-    usermod -u "$USER_ID" -g "$GROUP_ID" botuser 2>/dev/null || true
+# Match botuser UID/GID to the vault mount owner so writes don't get PermissionDenied.
+# Uses USER_ID/GROUP_ID env vars if set, otherwise auto-detects from /app/vault.
+VAULT_UID="${USER_ID:-$(stat -c '%u' /app/vault 2>/dev/null || echo '')}"
+VAULT_GID="${GROUP_ID:-$(stat -c '%g' /app/vault 2>/dev/null || echo '')}"
+
+if [ -n "$VAULT_UID" ] && [ -n "$VAULT_GID" ] && [ "$VAULT_UID" != "0" ]; then
+    echo "Adjusting botuser UID/GID to ${VAULT_UID}:${VAULT_GID}"
+    groupmod -g "$VAULT_GID" botuser 2>/dev/null || true
+    usermod -u "$VAULT_UID" -g "$VAULT_GID" botuser 2>/dev/null || true
     chown -R botuser:botuser /app
 fi
 
