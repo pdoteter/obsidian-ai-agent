@@ -10,7 +10,9 @@ if [ -n "$VAULT_UID" ] && [ -n "$VAULT_GID" ] && [ "$VAULT_UID" != "0" ]; then
     echo "Adjusting botuser UID/GID to ${VAULT_UID}:${VAULT_GID}"
     groupmod -g "$VAULT_GID" botuser 2>/dev/null || true
     usermod -u "$VAULT_UID" -g "$VAULT_GID" botuser 2>/dev/null || true
-    chown -R botuser:botuser /app
+    # chown files we own; skip read-only mounts (e.g. config.yaml mounted :ro)
+    chown botuser:botuser /app /app/obsidian-ai-agent 2>/dev/null || true
+    chown -R botuser:botuser /app/vault 2>/dev/null || true
 fi
 
 # Setup SSH keys: copy from read-only mount to writable home dir
