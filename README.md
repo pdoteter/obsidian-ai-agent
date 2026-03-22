@@ -30,6 +30,21 @@ Images are automatically built and pushed on every commit to `main`.
 
 To build locally instead, uncomment `build: .` in `docker-compose.yaml`.
 
+### Docker Environment Variables
+
+These variables are set in `docker-compose.yaml` or passed via `environment` / shell:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST_VAULT_PATH` | `./.vault` | Host path to your Obsidian vault |
+| `HOST_CONFIG_PATH` | `./config.docker.yaml` | Host path to `config.yaml` |
+| `HOST_SSH_DIR` | `~/.ssh` | Host SSH directory (mounted read-only) |
+| `TZ` | `Europe/Brussels` | Container timezone |
+| `USER_ID` | Auto-detected from vault | UID for the container user |
+| `GROUP_ID` | Auto-detected from vault | GID for the container user |
+| `GIT_USER_NAME` | `Obsidian AI Agent` | Git committer name |
+| `GIT_USER_EMAIL` | `bot@obsidian-ai-agent` | Git committer email |
+
 ### CI/CD Setup (GitHub Actions)
 
 The workflow at `.github/workflows/docker.yml` builds and pushes to Docker Hub. Add these secrets to your GitHub repo (`Settings > Secrets > Actions`):

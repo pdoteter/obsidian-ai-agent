@@ -47,9 +47,13 @@ else
     echo "No SSH keys mounted at /tmp/.ssh-host — git push over SSH will not work"
 fi
 
-# Mark vault as safe directory for botuser (ownership differs between mount and botuser)
-# Must use botuser's HOME so the config is visible when running as botuser
-su -s /bin/sh botuser -c "git config --global --add safe.directory /app/vault"
+# Configure git identity and safe directory for botuser
+# --author in `git commit` sets the author, but git still requires a committer identity
+su -s /bin/sh botuser -c "
+    git config --global user.name '${GIT_USER_NAME:-Obsidian AI Agent}'
+    git config --global user.email '${GIT_USER_EMAIL:-bot@obsidian-ai-agent}'
+    git config --global --add safe.directory /app/vault
+"
 
 # Auto-convert HTTPS remote URLs to SSH when SSH keys are available
 # Fixes: "could not read Username for 'https://github.com'" in non-interactive containers
