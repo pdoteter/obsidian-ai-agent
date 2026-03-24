@@ -42,6 +42,15 @@ futures = "0.3"
 # UUID generation (for unique filenames)
 uuid = { version = "1", features = ["v4"] }
 
+# Image processing
+image = "0.25"
+
+# Base64 encoding
+base64 = "0.22"
+
+# EXIF extraction (for image metadata)
+kamadak-exif = "0.5"
+
 [profile.release]
 opt-level = 3
 lto = true

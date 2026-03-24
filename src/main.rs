@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod git;
 mod handlers;
+mod image;
 mod vault;
 
 use std::sync::Arc;
