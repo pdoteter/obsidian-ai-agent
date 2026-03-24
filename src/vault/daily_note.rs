@@ -1,6 +1,6 @@
 use chrono::Local;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::{info, warn};
 
@@ -59,7 +59,7 @@ impl Default for DailyNoteSettings {
 impl DailyNoteSettings {
     /// Load daily note settings from `.obsidian/daily-notes.json` inside the vault.
     /// Returns default settings if the file doesn't exist or can't be parsed.
-    pub async fn load_from_vault(vault_path: &PathBuf) -> Self {
+    pub async fn load_from_vault(vault_path: &Path) -> Self {
         let config_path = vault_path.join(".obsidian").join("daily-notes.json");
 
         let raw = match fs::read_to_string(&config_path).await {

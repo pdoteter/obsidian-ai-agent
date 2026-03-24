@@ -90,7 +90,9 @@ pub async fn handle_voice_message(
                 ),
             )
             .await?;
-            sync_notifier.as_ref().map(|n| n.notify());
+            if let Some(n) = sync_notifier.as_ref() {
+                n.notify();
+            }
             return Ok(());
         }
     };

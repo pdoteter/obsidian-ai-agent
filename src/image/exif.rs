@@ -85,12 +85,8 @@ pub fn format_exif_context(exif: &ExifData) -> String {
         parts.push(format!("Photo taken: {}", date));
     }
 
-    if exif.gps_lat.is_some() && exif.gps_lon.is_some() {
-        parts.push(format!(
-            "Location: {}, {}",
-            exif.gps_lat.unwrap(),
-            exif.gps_lon.unwrap()
-        ));
+    if let (Some(lat), Some(lon)) = (exif.gps_lat, exif.gps_lon) {
+        parts.push(format!("Location: {}, {}", lat, lon));
     }
 
     if parts.is_empty() {
