@@ -1,6 +1,6 @@
 # Obsidian AI Agent
 
-Telegram bot that converts text and voice messages into structured Obsidian daily notes.
+Telegram bot that converts text, voice, and photo messages into structured Obsidian daily notes.
 
 ## Requirements
 
@@ -15,6 +15,16 @@ Telegram bot that converts text and voice messages into structured Obsidian dail
 2. Copy `config.yaml.example` to `config.yaml` and adjust settings
 3. `cargo build --release`
 4. `./target/release/obsidian-ai-agent`
+
+## Photo Messages
+
+Send photos via Telegram to automatically:
+- Resize and save to your vault's assets folder
+- Generate AI description and classification
+- Extract EXIF metadata (if available)
+- Append to daily note with Obsidian wiki link
+
+Photos are processed through the same classification pipeline as text/voice messages, including frontmatter extraction and guide support.
 
 ## Docker
 
@@ -61,6 +71,17 @@ Configuration is split into two files:
 - **`.env`** — API keys and secrets only
 - **`config.yaml`** — All other settings (paths, models, git, timezone, etc.)
 
+## System Guide
+
+Create a `system-guide.md` file (next to `config.yaml`) to customize AI classification behavior with your own rules. The guide is appended to the AI prompt for every message.
+
+Example use cases:
+- Extract health metrics (weight, body fat %) as frontmatter
+- Define custom trigger words for specific categories
+- Set language preferences
+
+See the included `system-guide.md` for an example.
+
 ### API Keys (`.env`)
 
 | Variable | Required | Description |
@@ -91,10 +112,40 @@ ai:
 access:
   allowed_user_ids: []                      # default: [] (allow all)
 
+guide_path: ./system-guide.md               # default: ./system-guide.md (optional)
+
+image:
+  max_dimension: 1280                       # default: 1280
+  jpeg_quality: 85                          # default: 85
+  assets_folder: assets                     # default: assets
+
 timezone: Europe/Brussels                   # default: Europe/Brussels
 date_display_format: YYYY/MM/DD             # default: YYYY/MM/DD (Moment.js syntax)
 log_level: info                             # default: info
 ```
+
+### Settings Table (`config.yaml`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `vault_path` | ✅ | Path to your Obsidian vault |
+| `git.sync_enabled` | ❌ | Enable Git sync (default: `true`) |
+| `git.path` | ❌ | Git repository root path |
+| `git.remote_name` | ❌ | Git remote name (default: `origin`) |
+| `git.branch` | ❌ | Git branch (default: `main`) |
+| `git.ssh_key_path` | ❌ | SSH key path (default: auto-detect) |
+| `git.sync_debounce_secs` | ❌ | Debounce sync timer in seconds (default: 300) |
+| `ai.whisper_model` | ❌ | Whisper model for voice transcription (default: `whisper-1`) |
+| `ai.whisper_language` | ❌ | Language code for Whisper (default: auto-detect) |
+| `ai.classify_model` | ❌ | OpenRouter model for classification (default: `google/gemini-2.5-flash`) |
+| `access.allowed_user_ids` | ❌ | Allowed Telegram user IDs (default: `[]` = all users) |
+| `guide_path` | ❌ | Path to custom AI guide file (default: `./system-guide.md`) |
+| `image.max_dimension` | ❌ | Maximum image dimension in pixels (default: 1280) |
+| `image.jpeg_quality` | ❌ | JPEG compression quality 1-100 (default: 85) |
+| `image.assets_folder` | ❌ | Folder name for saved images (default: `assets`) |
+| `timezone` | ❌ | Timezone for timestamps (default: `Europe/Brussels`) |
+| `date_display_format` | ❌ | Moment.js format for dates (default: `YYYY/MM/DD`) |
+| `log_level` | ❌ | Log level (default: `info`) |
 
 ## Model Recommendations
 

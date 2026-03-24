@@ -24,6 +24,15 @@ ai:
 access:
   allowed_user_ids: []                    # Comma-separated Telegram user IDs, e.g. [123456, 789012]
 
+# Path to custom AI guide (optional)
+# guide_path: ./system-guide.md           # Appended to AI prompt for all messages (default: ./system-guide.md)
+
+# Image processing settings (optional — defaults shown)
+# image:
+#   max_dimension: 1280                   # Max image dimension in pixels (default: 1280)
+#   jpeg_quality: 85                      # JPEG compression quality 1-100 (default: 85)
+#   assets_folder: assets                 # Folder name for saved images (default: assets)
+
 # Timezone for timestamps in daily notes (IANA format)
 timezone: Europe/Brussels
 
