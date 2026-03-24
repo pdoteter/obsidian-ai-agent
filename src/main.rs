@@ -150,7 +150,10 @@ async fn handle_message(
     sync_notifier: Option<debounce::SyncNotifier>,
 ) -> HandlerResult {
     // Route based on message content type
-    if msg.voice().is_some() {
+    if msg.photo().is_some() {
+        handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier)
+            .await
+    } else if msg.voice().is_some() {
         handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier)
             .await
     } else if msg.text().is_some() {
@@ -158,7 +161,7 @@ async fn handle_message(
     } else {
         bot.send_message(
             msg.chat.id,
-            "I can process text and voice messages. Please send one of those!",
+            "I can process text, voice, and photo messages. Please send one of those!",
         )
         .await?;
         Ok(())
