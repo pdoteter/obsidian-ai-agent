@@ -365,6 +365,28 @@ impl DailyNoteManager {
         Ok(path)
     }
 
+    /// Update frontmatter fields in today's daily note
+    pub async fn update_frontmatter(
+        &self,
+        fields: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<PathBuf, VaultError> {
+        let path = self.ensure_today().await?;
+
+        let file_content = fs::read_to_string(&path).await?;
+
+        let new_content = crate::vault::frontmatter::update_note_frontmatter(&file_content, fields);
+
+        fs::write(&path, &new_content).await?;
+
+        info!(
+            path = %path.display(),
+            field_count = fields.len(),
+            "Updated daily note frontmatter"
+        );
+
+        Ok(path)
+    }
+
     /// Append content to the end of today's daily note (fallback)
     #[allow(dead_code)]
     pub async fn append(&self, content: &str) -> Result<PathBuf, VaultError> {
@@ -493,5 +515,96 @@ mod tests {
     fn test_chrono_format_default() {
         let settings = DailyNoteSettings::default();
         assert_eq!(settings.chrono_format(), "%Y-%m-%d");
+    }
+
+    #[tokio::test]
+    async fn test_update_frontmatter_adds_new_fields() {
+        use std::collections::HashMap;
+        use serde_json::json;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        // Create daily note with existing frontmatter
+        let note_content = "---\ndate: 2026-03-24\ntags: [daily]\n---\n# Daily Note\n\nContent";
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let note_path = vault_path.join(format!("{}.md", today));
+        fs::write(&note_path, note_content).await.unwrap();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings::default(),
+            date_display_format: "%Y-%m-%d".to_string(),
+        };
+
+        let mut fields = HashMap::new();
+        fields.insert("gewicht".to_string(), json!(80.2));
+
+        let result = manager.update_frontmatter(&fields).await;
+        assert!(result.is_ok());
+
+        let updated = fs::read_to_string(&note_path).await.unwrap();
+        assert!(updated.contains("gewicht: 80.2"));
+        assert!(updated.contains("2026-03-24")); // Date value preserved
+        assert!(updated.contains("tags:")); // Tags field preserved
+    }
+
+    #[tokio::test]
+    async fn test_update_frontmatter_empty_hashmap_no_op() {
+        use std::collections::HashMap;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        let note_content = "---\ndate: 2026-03-24\n---\n# Daily Note\n\nContent";
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let note_path = vault_path.join(format!("{}.md", today));
+        fs::write(&note_path, note_content).await.unwrap();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings::default(),
+            date_display_format: "%Y-%m-%d".to_string(),
+        };
+
+        let fields = HashMap::new();
+        let result = manager.update_frontmatter(&fields).await;
+        assert!(result.is_ok());
+
+        let updated = fs::read_to_string(&note_path).await.unwrap();
+        // Content should be unchanged for empty HashMap
+        assert!(updated.starts_with("---\n"));
+        assert!(updated.contains("2026-03-24"));
+        assert!(updated.contains("# Daily Note"));
+    }
+
+    #[tokio::test]
+    async fn test_update_frontmatter_protected_keys_ignored() {
+        use std::collections::HashMap;
+        use serde_json::json;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        let note_content = "---\ndate: 2026-03-24\n---\n# Daily Note\n\nContent";
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let note_path = vault_path.join(format!("{}.md", today));
+        fs::write(&note_path, note_content).await.unwrap();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings::default(),
+            date_display_format: "%Y-%m-%d".to_string(),
+        };
+
+        let mut fields = HashMap::new();
+        fields.insert("date".to_string(), json!("9999-01-01"));
+
+        let result = manager.update_frontmatter(&fields).await;
+        assert!(result.is_ok());
+
+        let updated = fs::read_to_string(&note_path).await.unwrap();
+        assert!(updated.contains("2026-03-24")); // Original date preserved
+        assert!(!updated.contains("9999-01-01")); // Protected key not updated
     }
 }

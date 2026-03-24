@@ -60,6 +60,13 @@ pub async fn handle_text_message(
     let (section, content) = writer::format_for_daily_note(&classified);
     let _path = vault.append_to_section(section, &content).await?;
 
+    // Update frontmatter if AI provided any
+    if let Some(ref frontmatter) = classified.frontmatter {
+        if !frontmatter.is_empty() {
+            vault.update_frontmatter(frontmatter).await?;
+        }
+    }
+
     // Notify git sync
     if let Some(ref notifier) = sync_notifier {
         notifier.notify();

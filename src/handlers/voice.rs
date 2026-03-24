@@ -101,6 +101,15 @@ pub async fn handle_voice_message(
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
 
+    // Update frontmatter if AI provided any
+    if let Some(ref frontmatter) = classified.frontmatter {
+        if !frontmatter.is_empty() {
+            vault.update_frontmatter(frontmatter).await.map_err(|e| {
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+        }
+    }
+
     // Notify git sync
     if let Some(ref notifier) = sync_notifier {
         notifier.notify();
