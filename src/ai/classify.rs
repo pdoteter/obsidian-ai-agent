@@ -169,7 +169,8 @@ fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serd
                 "content": text
             }
         ],
-        "response_format": classified_note_response_format()
+        "response_format": classified_note_response_format(),
+        "max_tokens": 4096
     })
 }
 
@@ -215,7 +216,8 @@ fn build_image_request_body(
                 ]
             }
         ],
-        "response_format": classified_note_response_format()
+        "response_format": classified_note_response_format(),
+        "max_tokens": 4096
     })
 }
 
@@ -413,5 +415,23 @@ mod tests {
             !slug.is_empty(),
             "empty summary should produce non-empty fallback slug"
         );
+    }
+
+    #[test]
+    fn test_build_text_request_body_includes_max_tokens() {
+        let body = build_text_request_body("test input", "google/gemini-2.5-flash", "system prompt");
+        assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
+    }
+
+    #[test]
+    fn test_build_image_request_body_includes_max_tokens() {
+        let body = build_image_request_body(
+            "data:image/jpeg;base64,abc123",
+            Some("Test caption"),
+            "EXIF context",
+            "google/gemini-2.5-flash",
+            "system prompt",
+        );
+        assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
     }
 }
