@@ -113,7 +113,7 @@ impl DailyNoteSettings {
 /// Supports the most common tokens used in Obsidian daily note formats.
 /// Tokens are replaced longest-match-first to avoid partial replacement issues
 /// (e.g. "YYYY" before "YY").
-fn momentjs_to_chrono(moment_fmt: &str) -> String {
+pub(crate) fn momentjs_to_chrono(moment_fmt: &str) -> String {
     let mut result = String::with_capacity(moment_fmt.len() * 2);
     let chars: Vec<char> = moment_fmt.chars().collect();
     let len = chars.len();
@@ -227,16 +227,22 @@ fn match_moment_token(chars: &[char], i: usize, len: usize) -> Option<(&'static 
 pub struct DailyNoteManager {
     vault_path: PathBuf,
     settings: DailyNoteSettings,
+    /// Chrono strftime format for {{date}}/{{title}} in templates
+    date_display_format: String,
 }
 
 impl DailyNoteManager {
     /// Create a new DailyNoteManager by loading settings from the vault's
     /// `.obsidian/daily-notes.json` configuration file.
-    pub async fn new(vault_path: PathBuf) -> Self {
+    ///
+    /// `date_display_format` is a chrono strftime string used for `{{date}}`/`{{title}}`
+    /// in daily note templates.
+    pub async fn new(vault_path: PathBuf, date_display_format: String) -> Self {
         let settings = DailyNoteSettings::load_from_vault(&vault_path).await;
         Self {
             vault_path,
             settings,
+            date_display_format,
         }
     }
 
@@ -315,16 +321,17 @@ impl DailyNoteManager {
         // Create file from template if it doesn't exist
         if !path.exists() {
             let today = Local::now().date_naive();
-            let date_str = self.format_date(&today);
 
             // Try configured template, fall back to built-in
             let template = self.read_template().await.unwrap_or_else(|| FALLBACK_TEMPLATE.to_string());
 
             // Replace Obsidian template variables
+            // {{date}} uses the configured date_display_format, not the file-path format
+            let display_date = today.format(&self.date_display_format).to_string();
             let content = template
-                .replace("{{date}}", &date_str)
+                .replace("{{date}}", &display_date)
                 .replace("{{time}}", &Local::now().format("%H:%M").to_string())
-                .replace("{{title}}", &date_str);
+                .replace("{{title}}", &display_date);
 
             fs::write(&path, &content).await?;
             info!(path = %path.display(), "Created new daily note from template");

@@ -72,7 +72,7 @@ async fn main() {
     };
 
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
-    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone()).await);
+    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone(), config.date_display_format.clone()).await);
 
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {

@@ -92,6 +92,7 @@ access:
   allowed_user_ids: []                      # default: [] (allow all)
 
 timezone: Europe/Brussels                   # default: Europe/Brussels
+date_display_format: YYYY/MM/DD             # default: YYYY/MM/DD (Moment.js syntax)
 log_level: info                             # default: info
 ```
 

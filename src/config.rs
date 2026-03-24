@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+use crate::vault::daily_note::momentjs_to_chrono;
+
 /// Settings loaded from the YAML config file (non-secret values).
 #[derive(Debug, Deserialize)]
 struct FileConfig {
@@ -22,6 +24,10 @@ struct FileConfig {
 
     #[serde(default = "default_log_level")]
     log_level: String,
+
+    /// Moment.js format for {{date}} in daily note templates (default: "YYYY/MM/DD")
+    #[serde(default = "default_date_display_format")]
+    date_display_format: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +114,9 @@ fn default_whisper_model() -> String {
 fn default_classify_model() -> String {
     "google/gemini-2.5-flash".to_string()
 }
+fn default_date_display_format() -> String {
+    "YYYY/MM/DD".to_string()
+}
 
 /// Runtime config used by the application. Built from YAML file + env-var secrets.
 #[derive(Debug, Clone)]
@@ -127,6 +136,8 @@ pub struct Config {
     pub openrouter_model_classify: String,
     pub allowed_user_ids: Vec<u64>,
     pub timezone: String,
+    /// Chrono strftime format for {{date}} in daily note templates
+    pub date_display_format: String,
 }
 
 impl Config {
@@ -192,6 +203,7 @@ impl Config {
             openrouter_model_classify: file.ai.classify_model,
             allowed_user_ids: file.access.allowed_user_ids,
             timezone: file.timezone,
+            date_display_format: momentjs_to_chrono(&file.date_display_format),
         })
     }
 

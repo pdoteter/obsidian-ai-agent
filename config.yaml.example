@@ -27,5 +27,8 @@ access:
 # Timezone for timestamps in daily notes (IANA format)
 timezone: Europe/Brussels
 
+# Date format for {{date}} in daily note templates (Moment.js syntax, default: YYYY/MM/DD)
+date_display_format: YYYY/MM/DD
+
 # Log level (trace, debug, info, warn, error)
 log_level: info

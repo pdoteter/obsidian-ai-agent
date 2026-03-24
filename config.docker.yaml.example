@@ -28,4 +28,5 @@ access:
   allowed_user_ids: []
 
 timezone: Europe/Brussels
+date_display_format: YYYY/MM/DD
 log_level: info
