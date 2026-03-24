@@ -91,9 +91,10 @@ pub fn sanitize_slug(raw: &str) -> String {
 }
 
 pub fn generate_filename(date: &str, slug: &str) -> String {
+    let safe_date = date.replace(['/', '\\'], "-");
     let sanitized = sanitize_slug(slug);
     let uuid_suffix = &uuid::Uuid::new_v4().to_string()[..4];
-    format!("{}-{}-{}.jpg", date, sanitized, uuid_suffix)
+    format!("{}-{}-{}.jpg", safe_date, sanitized, uuid_suffix)
 }
 
 pub async fn save_image(
@@ -289,5 +290,13 @@ mod tests {
         let uuid_part = parts[0].strip_suffix(".jpg").unwrap();
         assert_eq!(uuid_part.len(), 4);
         assert!(uuid_part.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_generate_filename_with_slashes_in_date() {
+        let filename = generate_filename("2026/03/24", "sunset");
+        assert!(!filename.contains('/'), "filename should not contain forward slashes");
+        assert!(!filename.contains('\\'), "filename should not contain backslashes");
+        assert!(filename.starts_with("2026-03-24-"), "slashes should be replaced with dashes");
     }
 }

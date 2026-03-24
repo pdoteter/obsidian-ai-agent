@@ -96,8 +96,9 @@ pub async fn handle_photo_message(
         .await;
 
     // 10. Generate filename (with fallback on AI failure)
+    // Use a path-safe date format for filenames (not date_display_format which may contain '/')
     let today = chrono::Local::now()
-        .format(&config.date_display_format)
+        .format("%Y-%m-%d")
         .to_string();
 
     let (filename, summary) = match &classified {
@@ -208,8 +209,9 @@ fn format_photo_content(
 }
 
 fn generate_fallback_filename(date: &str) -> String {
+    let safe_date = date.replace(['/', '\\'], "-");
     let uuid_suffix = &uuid::Uuid::new_v4().to_string()[..4];
-    format!("{}-photo-{}.jpg", date, uuid_suffix)
+    format!("{}-photo-{}.jpg", safe_date, uuid_suffix)
 }
 
 #[cfg(test)]
@@ -249,5 +251,13 @@ mod tests {
             suffix.chars().all(|c| c.is_ascii_hexdigit()),
             "uuid suffix should be hexadecimal"
         );
+    }
+
+    #[test]
+    fn test_generate_fallback_filename_with_slashes_in_date() {
+        let filename = generate_fallback_filename("2026/03/24");
+        assert!(!filename.contains('/'), "filename should not contain forward slashes");
+        assert!(!filename.contains('\\'), "filename should not contain backslashes");
+        assert!(filename.starts_with("2026-03-24-photo-"), "slashes should be replaced with dashes");
     }
 }
