@@ -28,6 +28,12 @@ struct FileConfig {
     /// Moment.js format for {{date}} in daily note templates (default: "YYYY/MM/DD")
     #[serde(default = "default_date_display_format")]
     date_display_format: String,
+
+    #[serde(default = "default_guide_path")]
+    guide_path: Option<PathBuf>,
+
+    #[serde(default)]
+    image: ImageConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +123,28 @@ fn default_classify_model() -> String {
 fn default_date_display_format() -> String {
     "YYYY/MM/DD".to_string()
 }
+fn default_guide_path() -> Option<PathBuf> {
+    Some(PathBuf::from("./system-guide.md"))
+}
+
+/// Image configuration settings
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ImageConfig {
+    pub max_dimension: u32,
+    pub jpeg_quality: u8,
+    pub assets_folder: String,
+}
+
+impl Default for ImageConfig {
+    fn default() -> Self {
+        Self {
+            max_dimension: 1280,
+            jpeg_quality: 85,
+            assets_folder: "assets".to_string(),
+        }
+    }
+}
 
 /// Runtime config used by the application. Built from YAML file + env-var secrets.
 #[derive(Debug, Clone)]
@@ -138,6 +166,8 @@ pub struct Config {
     pub timezone: String,
     /// Chrono strftime format for {{date}} in daily note templates
     pub date_display_format: String,
+    pub guide_path: Option<PathBuf>,
+    pub image: ImageConfig,
 }
 
 impl Config {
@@ -204,6 +234,8 @@ impl Config {
             allowed_user_ids: file.access.allowed_user_ids,
             timezone: file.timezone,
             date_display_format: momentjs_to_chrono(&file.date_display_format),
+            guide_path: file.guide_path,
+            image: file.image,
         })
     }
 
@@ -229,4 +261,82 @@ pub enum ConfigError {
 
     #[error("Invalid path: {0} does not exist")]
     InvalidPath(PathBuf),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_guide_path() {
+        // Verify Config::default() has guide_path = Some("./system-guide.md")
+        let file_config: FileConfig = serde_yml::from_str("vault_path: /tmp/vault\n").unwrap();
+
+        assert!(file_config.guide_path.is_some());
+        assert_eq!(
+            file_config.guide_path.as_ref().unwrap(),
+            &PathBuf::from("./system-guide.md")
+        );
+    }
+
+    #[test]
+    fn test_custom_guide_path() {
+        // Deserialize config with guide_path: "/custom/path.md" → verify field set
+        let file_config: FileConfig =
+            serde_yml::from_str("vault_path: /tmp/vault\nguide_path: /custom/path.md\n").unwrap();
+
+        assert!(file_config.guide_path.is_some());
+        assert_eq!(
+            file_config.guide_path.as_ref().unwrap(),
+            &PathBuf::from("/custom/path.md")
+        );
+    }
+
+    #[test]
+    fn test_guide_path_none() {
+        // Deserialize config with guide_path: null → verify None
+        let file_config: FileConfig =
+            serde_yml::from_str("vault_path: /tmp/vault\nguide_path: null\n").unwrap();
+
+        assert!(file_config.guide_path.is_none());
+    }
+
+    #[test]
+    fn test_image_config_defaults() {
+        // Verify ImageConfig::default() has max_dimension=1280, jpeg_quality=85, assets_folder="assets"
+        let image_config = ImageConfig::default();
+        assert_eq!(image_config.max_dimension, 1280);
+        assert_eq!(image_config.jpeg_quality, 85);
+        assert_eq!(image_config.assets_folder, "assets");
+    }
+
+    #[test]
+    fn test_custom_image_config() {
+        // Deserialize config with custom image section → verify fields
+        let file_config: FileConfig = serde_yml::from_str(
+            "vault_path: /tmp/vault\nimage:\n  max_dimension: 2048\n  jpeg_quality: 90\n  assets_folder: my_assets\n"
+        ).unwrap();
+
+        assert_eq!(file_config.image.max_dimension, 2048);
+        assert_eq!(file_config.image.jpeg_quality, 90);
+        assert_eq!(file_config.image.assets_folder, "my_assets");
+    }
+
+    #[test]
+    fn test_backward_compat_missing_guide_and_image() {
+        // Deserialize config WITHOUT guide_path or image fields → verify defaults applied, no errors
+        let file_config: FileConfig = serde_yml::from_str("vault_path: /tmp/vault\n").unwrap();
+
+        // guide_path should have default
+        assert!(file_config.guide_path.is_some());
+        assert_eq!(
+            file_config.guide_path.as_ref().unwrap(),
+            &PathBuf::from("./system-guide.md")
+        );
+
+        // image should have defaults
+        assert_eq!(file_config.image.max_dimension, 1280);
+        assert_eq!(file_config.image.jpeg_quality, 85);
+        assert_eq!(file_config.image.assets_folder, "assets");
+    }
 }

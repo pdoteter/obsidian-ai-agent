@@ -21,12 +21,33 @@ pub enum AppError {
 
     #[error("Git error: {0}")]
     Git(#[from] GitError),
+
+    #[error("Image processing error: {0}")]
+    Image(#[from] ImageError),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum AudioError {
     #[error("Failed to download file from Telegram: {0}")]
     Download(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImageError {
+    #[error("Failed to download image from Telegram: {0}")]
+    Download(String),
+
+    #[error("Image resize failed: {0}")]
+    ResizeFailed(String),
+
+    #[error("EXIF extraction failed: {0}")]
+    ExifFailed(String),
+
+    #[error("Failed to save image: {0}")]
+    SaveFailed(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
