@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
 use tracing::info;
 
 use super::client::OpenRouterClient;
@@ -35,6 +36,9 @@ pub struct ClassifiedNote {
     pub tags: Vec<String>,
     /// Brief summary (1 line)
     pub summary: String,
+    /// Optional key-value pairs for daily note frontmatter updates
+    #[serde(default)]
+    pub frontmatter: Option<HashMap<String, serde_json::Value>>,
 }
 
 impl OpenRouterClient {
@@ -43,15 +47,17 @@ impl OpenRouterClient {
         &self,
         text: &str,
         model: &str,
+        guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
         info!(text_length = text.len(), model = model, "Classifying text");
+        let system_prompt = crate::ai::guide::compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, guide);
 
         let body = json!({
             "model": model,
             "messages": [
                 {
                     "role": "system",
-                    "content": CLASSIFICATION_SYSTEM_PROMPT
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
@@ -83,9 +89,14 @@ impl OpenRouterClient {
                             "summary": {
                                 "type": "string",
                                 "description": "A one-line summary of the content"
+                            },
+                            "frontmatter": {
+                                "type": ["object", "null"],
+                                "description": "Optional frontmatter key-value pairs to add/update in the daily note YAML frontmatter. Use for structured data like weight, measurements, etc. Return null if no frontmatter updates needed.",
+                                "additionalProperties": true
                             }
                         },
-                        "required": ["category", "markdown", "tags", "summary"],
+                        "required": ["category", "markdown", "tags", "summary", "frontmatter"],
                         "additionalProperties": false
                     }
                 }
@@ -140,3 +151,95 @@ const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge manag
 - For todos, always use `- [ ] ` checkbox format
 - For logs, do NOT include time — timestamps are added automatically by the system
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::guide::compose_system_prompt;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_classified_note_deserialize_with_frontmatter() {
+        let value = json!({
+            "category": "note",
+            "markdown": "test",
+            "tags": [],
+            "summary": "test",
+            "frontmatter": {"gewicht": 80.2}
+        });
+
+        let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
+        let frontmatter = note.frontmatter.expect("frontmatter should be Some");
+
+        assert_eq!(
+            frontmatter.get("gewicht"),
+            Some(&json!(80.2)),
+            "frontmatter should contain gewicht value"
+        );
+    }
+
+    #[test]
+    fn test_classified_note_deserialize_without_frontmatter() {
+        let value = json!({
+            "category": "note",
+            "markdown": "test",
+            "tags": [],
+            "summary": "test",
+            "frontmatter": null
+        });
+
+        let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
+        assert!(note.frontmatter.is_none(), "frontmatter null should map to None");
+    }
+
+    #[test]
+    fn test_classified_note_deserialize_empty_frontmatter() {
+        let value = json!({
+            "category": "note",
+            "markdown": "test",
+            "tags": [],
+            "summary": "test",
+            "frontmatter": {}
+        });
+
+        let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
+        let frontmatter = note.frontmatter.expect("frontmatter should be Some");
+        let expected: HashMap<String, serde_json::Value> = HashMap::new();
+        assert_eq!(frontmatter, expected, "frontmatter should be empty map");
+    }
+
+    #[test]
+    fn test_classified_note_backward_compat() {
+        let value = json!({
+            "category": "note",
+            "markdown": "test",
+            "tags": [],
+            "summary": "test"
+        });
+
+        let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
+        assert!(
+            note.frontmatter.is_none(),
+            "missing frontmatter should map to None"
+        );
+    }
+
+    #[test]
+    fn test_compose_system_prompt_with_guide() {
+        let guide = "## Custom Rules\ngewicht triggers frontmatter";
+        let composed = compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, Some(guide));
+
+        assert!(composed.contains(CLASSIFICATION_SYSTEM_PROMPT));
+        assert!(composed.contains("<user_guide>"));
+        assert!(composed.contains("## Custom Rules"));
+        assert!(composed.contains("</user_guide>"));
+    }
+
+    #[test]
+    fn test_compose_system_prompt_without_guide() {
+        let composed = compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, None);
+
+        assert_eq!(composed, CLASSIFICATION_SYSTEM_PROMPT);
+    }
+}

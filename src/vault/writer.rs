@@ -50,6 +50,7 @@ mod tests {
             markdown: "- [ ] Buy groceries".to_string(),
             tags: vec!["shopping".to_string()],
             summary: "Buy groceries".to_string(),
+            frontmatter: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -65,6 +66,7 @@ mod tests {
             markdown: "- Team meeting".to_string(),
             tags: vec!["work".to_string()],
             summary: "Team meeting".to_string(),
+            frontmatter: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -82,6 +84,7 @@ mod tests {
             markdown: "- Went for a run".to_string(),
             tags: vec![],
             summary: "Running".to_string(),
+            frontmatter: None,
         };
 
         let (section, content) = format_for_daily_note(&note);

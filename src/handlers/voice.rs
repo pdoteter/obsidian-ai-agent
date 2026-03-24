@@ -70,8 +70,9 @@ pub async fn handle_voice_message(
     debug!(transcript = %transcript, "Full transcript");
 
     // Step 3: Classify the transcribed text
+    let guide = crate::ai::guide::load_guide(&config.guide_path);
     let classified = match ai_client
-        .classify_text(&transcript, &config.openrouter_model_classify)
+        .classify_text(&transcript, &config.openrouter_model_classify, guide.as_deref())
         .await
     {
         Ok(c) => c,
