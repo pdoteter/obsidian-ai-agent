@@ -193,6 +193,12 @@ impl Config {
         let file: FileConfig = serde_yml::from_str(&yaml_content)
             .map_err(|e| ConfigError::Parse(config_path.clone(), e.to_string()))?;
 
+        // Extract config directory for resolving relative paths (e.g., guide_path)
+        let config_dir = config_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
         // Validate vault path
         let vault_path = PathBuf::from(&file.vault_path);
         if !vault_path.exists() {
@@ -217,6 +223,15 @@ impl Config {
             env::set_var("RUST_LOG", &file.log_level);
         }
 
+        // Resolve guide_path relative to config directory if relative
+        let guide_path = file.guide_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(p)
+            }
+        });
+
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
@@ -234,7 +249,7 @@ impl Config {
             allowed_user_ids: file.access.allowed_user_ids,
             timezone: file.timezone,
             date_display_format: momentjs_to_chrono(&file.date_display_format),
-            guide_path: file.guide_path,
+            guide_path,
             image: file.image,
         })
     }
@@ -338,5 +353,102 @@ mod tests {
         assert_eq!(file_config.image.max_dimension, 1280);
         assert_eq!(file_config.image.jpeg_quality, 85);
         assert_eq!(file_config.image.assets_folder, "assets");
+    }
+
+    #[test]
+    fn test_guide_path_resolves_relative_to_config() {
+        // Verify guide_path is resolved relative to config file directory when relative
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_subdir = temp_dir.path().join("subdir");
+        std::fs::create_dir_all(&config_subdir).unwrap();
+        let config_file = config_subdir.join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).unwrap();
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+guide_path: ./my-guide.md
+git:
+  sync_enabled: false
+"#,
+                vault_dir.display()
+            ),
+        )
+        .unwrap();
+
+        // Clear any previous CONFIG_PATH
+        let old_config_path = env::var("CONFIG_PATH").ok();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_token");
+        env::set_var("OPENROUTER_API_KEY", "test_key");
+        env::set_var("OPENAI_API_KEY", "test_key");
+
+        let config = Config::load().unwrap();
+
+        // Should resolve to config_file.parent() / my-guide.md
+        let expected = config_subdir.join("my-guide.md");
+        assert_eq!(config.guide_path, Some(expected));
+
+        // Restore old state
+        env::remove_var("CONFIG_PATH");
+        env::remove_var("TELOXIDE_TOKEN");
+        env::remove_var("OPENROUTER_API_KEY");
+        env::remove_var("OPENAI_API_KEY");
+        if let Some(path) = old_config_path {
+            env::set_var("CONFIG_PATH", path);
+        }
+    }
+
+    #[test]
+    fn test_guide_path_absolute_unchanged() {
+        // Verify absolute guide_path values are not modified
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let config_file = temp_dir.path().join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).unwrap();
+
+        // Create an absolute path (works on all platforms)
+        let abs_guide_path = temp_dir.path().join("absolute_guide.md");
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+guide_path: {}
+git:
+  sync_enabled: false
+"#,
+                vault_dir.display(),
+                abs_guide_path.display()
+            ),
+        )
+        .unwrap();
+
+        // Clear any previous CONFIG_PATH
+        let old_config_path = env::var("CONFIG_PATH").ok();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_token");
+        env::set_var("OPENROUTER_API_KEY", "test_key");
+        env::set_var("OPENAI_API_KEY", "test_key");
+
+        let config = Config::load().unwrap();
+
+        // Should remain unchanged (absolute)
+        assert_eq!(config.guide_path, Some(abs_guide_path));
+
+        // Restore old state
+        env::remove_var("CONFIG_PATH");
+        env::remove_var("TELOXIDE_TOKEN");
+        env::remove_var("OPENROUTER_API_KEY");
+        env::remove_var("OPENAI_API_KEY");
+        if let Some(path) = old_config_path {
+            env::set_var("CONFIG_PATH", path);
+        }
     }
 }
