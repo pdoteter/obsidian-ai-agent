@@ -52,66 +52,8 @@ impl OpenRouterClient {
         info!(text_length = text.len(), model = model, "Classifying text");
         let system_prompt = crate::ai::guide::compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, guide);
 
-        let body = json!({
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": text
-                }
-            ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "classified_note",
-                    "strict": true,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "category": {
-                                "type": "string",
-                                "enum": ["todo", "log", "note"],
-                                "description": "The type of entry: todo for action items, log for activity/event logs, note for knowledge/thoughts"
-                            },
-                            "markdown": {
-                                "type": "string",
-                                "description": "The formatted markdown content. For todos: use '- [ ] ' prefix. For logs: use '- <activity description>' (do NOT include time — it will be added automatically). For notes: use a clean paragraph or bullet points."
-                            },
-                            "tags": {
-                                "type": "array",
-                                "items": { "type": "string" },
-                                "description": "Relevant Obsidian tags without # prefix (e.g. 'work', 'health', 'project-x')"
-                            },
-                            "summary": {
-                                "type": "string",
-                                "description": "A one-line summary of the content"
-                            },
-                            "frontmatter": {
-                                "type": ["object", "null"],
-                                "description": "Optional frontmatter key-value pairs to add/update in the daily note YAML frontmatter. Use for structured data like weight, measurements, etc. Return null if no frontmatter updates needed.",
-                                "additionalProperties": true
-                            }
-                        },
-                        "required": ["category", "markdown", "tags", "summary", "frontmatter"],
-                        "additionalProperties": false
-                    }
-                }
-            }
-        });
-
-        let response = self.chat_completion(body).await?;
-        let content = Self::extract_content(&response)?;
-
-        let classified: ClassifiedNote = serde_json::from_str(&content).map_err(|e| {
-            AiError::ClassificationFailed(format!(
-                "Failed to parse classification JSON: {}. Raw: {}",
-                e, content
-            ))
-        })?;
+        let body = build_text_request_body(text, model, &system_prompt);
+        let classified = self.chat_completion_and_parse_classification(body).await?;
 
         info!(
             category = %classified.category,
@@ -121,6 +63,169 @@ impl OpenRouterClient {
         );
 
         Ok(classified)
+    }
+
+    /// Classify an image using vision API (multimodal)
+    pub async fn classify_image(
+        &self,
+        image_base64: &str,
+        caption: Option<&str>,
+        exif_context: &str,
+        model: &str,
+        guide: Option<&str>,
+    ) -> Result<ClassifiedNote, AiError> {
+        info!(
+            caption_length = caption.map(|s| s.len()).unwrap_or(0),
+            has_exif = !exif_context.is_empty(),
+            model = model,
+            "Classifying image"
+        );
+
+        let base_prompt = format!(
+            "{}\n\nYou are also receiving an image. Describe what you see and classify it. If a caption is provided, use it as primary context. Include the image description in the markdown output as a short paragraph.",
+            CLASSIFICATION_SYSTEM_PROMPT
+        );
+        let system_prompt = crate::ai::guide::compose_system_prompt(&base_prompt, guide);
+
+        let body = build_image_request_body(image_base64, caption, exif_context, model, &system_prompt);
+        let classified = self.chat_completion_and_parse_classification(body).await?;
+
+        info!(
+            category = %classified.category,
+            tags = ?classified.tags,
+            summary = %classified.summary,
+            "Image classified"
+        );
+
+        Ok(classified)
+    }
+
+    async fn chat_completion_and_parse_classification(
+        &self,
+        body: serde_json::Value,
+    ) -> Result<ClassifiedNote, AiError> {
+        let response = self.chat_completion(body).await?;
+        let content = Self::extract_content(&response)?;
+
+        serde_json::from_str(&content).map_err(|e| {
+            AiError::ClassificationFailed(format!(
+                "Failed to parse classification JSON: {}. Raw: {}",
+                e, content
+            ))
+        })
+    }
+}
+
+fn classified_note_response_format() -> serde_json::Value {
+    json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "classified_note",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["todo", "log", "note"],
+                        "description": "The type of entry: todo for action items, log for activity/event logs, note for knowledge/thoughts"
+                    },
+                    "markdown": {
+                        "type": "string",
+                        "description": "The formatted markdown content. For todos: use '- [ ] ' prefix. For logs: use '- <activity description>' (do NOT include time — it will be added automatically). For notes: use a clean paragraph or bullet points."
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Relevant Obsidian tags without # prefix (e.g. 'work', 'health', 'project-x')"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "A one-line summary of the content"
+                    },
+                    "frontmatter": {
+                        "type": ["object", "null"],
+                        "description": "Optional frontmatter key-value pairs to add/update in the daily note YAML frontmatter. Use for structured data like weight, measurements, etc. Return null if no frontmatter updates needed.",
+                        "additionalProperties": true
+                    }
+                },
+                "required": ["category", "markdown", "tags", "summary", "frontmatter"],
+                "additionalProperties": false
+            }
+        }
+    })
+}
+
+fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serde_json::Value {
+    json!({
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ],
+        "response_format": classified_note_response_format()
+    })
+}
+
+fn build_image_request_body(
+    image_base64: &str,
+    caption: Option<&str>,
+    exif_context: &str,
+    model: &str,
+    system_prompt: &str,
+) -> serde_json::Value {
+    let text_content = if let Some(cap) = caption {
+        if exif_context.is_empty() {
+            cap.to_string()
+        } else {
+            format!("{}\n\n{}", cap, exif_context)
+        }
+    } else if exif_context.is_empty() {
+        "Describe this image.".to_string()
+    } else {
+        format!("Describe this image.\n\n{}", exif_context)
+    };
+
+    json!({
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": text_content
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_base64
+                        }
+                    }
+                ]
+            }
+        ],
+        "response_format": classified_note_response_format()
+    })
+}
+
+/// Generate a filename-safe slug from an AI summary
+pub fn slug_from_summary(summary: &str) -> String {
+    let slug = crate::image::process::sanitize_slug(summary);
+    if slug.is_empty() {
+        "untitled".to_string()
+    } else {
+        slug
     }
 }
 
@@ -241,5 +346,72 @@ mod tests {
         let composed = compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, None);
 
         assert_eq!(composed, CLASSIFICATION_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn test_build_image_request_body_multimodal_with_caption() {
+        let body = build_image_request_body(
+            "data:image/jpeg;base64,abc123",
+            Some("A calm harbor at sunset"),
+            "Photo taken: 2026:03:24 18:30:00.",
+            "google/gemini-2.5-flash",
+            "system prompt",
+        );
+
+        assert_eq!(body["model"], json!("google/gemini-2.5-flash"));
+        assert_eq!(body["messages"][0]["role"], json!("system"));
+
+        let user_content = &body["messages"][1]["content"];
+        assert!(
+            user_content.is_array(),
+            "user content should be an array for multimodal input"
+        );
+        assert_eq!(user_content[0]["type"], json!("text"));
+        assert_eq!(
+            user_content[1]["type"],
+            json!("image_url"),
+            "second content block should carry image_url"
+        );
+        assert_eq!(
+            user_content[1]["image_url"]["url"],
+            json!("data:image/jpeg;base64,abc123")
+        );
+
+        let text_block = user_content[0]["text"].as_str().unwrap_or("");
+        assert!(text_block.contains("A calm harbor at sunset"));
+        assert!(text_block.contains("Photo taken: 2026:03:24 18:30:00."));
+    }
+
+    #[test]
+    fn test_slug_from_summary() {
+        let slug = slug_from_summary("Beautiful sunset over the harbor");
+        assert_eq!(slug, "beautiful-sunset-over-the-harbor");
+    }
+
+    #[test]
+    fn test_slug_from_summary_long() {
+        let input = "This is an intentionally long summary sentence that should be trimmed cleanly";
+        let slug = slug_from_summary(input);
+
+        assert!(slug.len() <= 50, "slug should be max 50 chars");
+        assert!(
+            !slug.ends_with('-'),
+            "slug should not end with trailing hyphen"
+        );
+    }
+
+    #[test]
+    fn test_slug_from_summary_special_chars() {
+        let slug = slug_from_summary("Test! @#$ Photo 123");
+        assert_eq!(slug, "test-photo-123");
+    }
+
+    #[test]
+    fn test_slug_from_summary_empty() {
+        let slug = slug_from_summary("");
+        assert!(
+            !slug.is_empty(),
+            "empty summary should produce non-empty fallback slug"
+        );
     }
 }
