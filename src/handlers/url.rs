@@ -1,0 +1,340 @@
+use std::sync::Arc;
+
+use teloxide::prelude::*;
+use teloxide::types::ChatAction;
+use tracing::{error, info, warn};
+
+use crate::ai::client::OpenRouterClient;
+use crate::config::Config;
+use crate::git::chat_tracker::ChatIdTracker;
+use crate::git::debounce::SyncNotifier;
+use crate::url::detect::{DetectedUrl, UrlType};
+use crate::url::extract::fetch_page_content;
+use crate::url::youtube::fetch_youtube_metadata;
+use crate::url::PageContent;
+use crate::vault::daily_note::DailyNoteManager;
+use crate::vault::writer;
+
+/// Handle URLs found in Telegram messages
+///
+/// Pipeline: fetch content → AI summarize → format TODO → write to vault
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_url_message(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Config>,
+    ai_client: Arc<OpenRouterClient>,
+    vault: Arc<DailyNoteManager>,
+    sync_notifier: Option<SyncNotifier>,
+    chat_tracker: ChatIdTracker,
+    urls: Vec<DetectedUrl>,
+    surrounding_text: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if urls.is_empty() {
+        return Ok(());
+    }
+
+    // 1) auth check
+    if let Some(user) = msg.from.as_ref() {
+        if !config.is_user_allowed(user.id.0) {
+            info!(user_id = user.id.0, "Unauthorized user, ignoring URL message");
+            return Ok(());
+        }
+    }
+
+    // Track chat_id for conflict notifications (after auth check)
+    chat_tracker.set(msg.chat.id).await;
+
+    // 2) enforce max URL limit
+    let max_urls = config.url.max_urls_per_message;
+    let total_urls = urls.len();
+    let (urls_to_process, truncated) = enforce_url_limit(urls, max_urls);
+
+    // 3) immediate processing message before network work
+    let status_msg = bot
+        .send_message(
+            msg.chat.id,
+            build_processing_message(urls_to_process.len()),
+        )
+        .await?;
+
+    // 4) process each URL with graceful degradation
+    let mut success_count = 0usize;
+    let mut results = Vec::new();
+
+    for detected_url in &urls_to_process {
+        bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
+
+        let fetched_page = fetch_for_url_type(detected_url, &config).await;
+
+        let (title_for_todo, summary_for_todo, tags_for_todo) = match fetched_page {
+            Ok(page_content) => {
+                let fetched_title = page_content.title.clone();
+                let guide = crate::ai::guide::load_guide(&config.guide_path);
+
+                match ai_client
+                    .summarize_url(
+                        &page_content,
+                        surrounding_text.as_deref(),
+                        &config.openrouter_model_classify,
+                        guide.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(summary) => {
+                        info!(
+                            url = %detected_url.url,
+                            ai_title = %summary.title,
+                            tags_count = summary.tags.len(),
+                            "AI summarized URL"
+                        );
+                        (
+                            Some(summary.title),
+                            Some(summary.summary),
+                            summary.tags,
+                        )
+                    }
+                    Err(e) => {
+                        // Graceful degradation: AI failed -> title-only TODO
+                        error!(error = %e, url = %detected_url.url, "AI summarization failed");
+                        (fetched_title, None, Vec::new())
+                    }
+                }
+            }
+            Err(e) => {
+                // Graceful degradation: fetch failed -> plain URL TODO
+                error!(error = %e, url = %detected_url.url, "Failed to fetch URL content");
+                (None, None, Vec::new())
+            }
+        };
+
+        let (section, content) = writer::format_url_todo(
+            &detected_url.url,
+            title_for_todo.as_deref(),
+            summary_for_todo.as_deref(),
+            &tags_for_todo,
+            None, // transcript integration is a later task
+        );
+
+        match vault.append_to_section(section, &content).await {
+            Ok(_) => {
+                success_count += 1;
+                results.push(format_result_item(
+                    title_for_todo.as_deref(),
+                    &detected_url.url,
+                    true,
+                ));
+            }
+            Err(e) => {
+                error!(error = %e, url = %detected_url.url, "Failed to write URL TODO to vault");
+                results.push(format_result_item(
+                    title_for_todo.as_deref(),
+                    &detected_url.url,
+                    false,
+                ));
+            }
+        }
+    }
+
+    // 5) notify git sync once
+    if success_count > 0 {
+        if let Some(ref notifier) = sync_notifier {
+            notifier.notify();
+        }
+    }
+
+    // 6) edit processing message to final confirmation
+    let confirmation = build_confirmation_message(
+        success_count,
+        urls_to_process.len(),
+        total_urls,
+        max_urls,
+        truncated,
+        &results,
+    );
+
+    bot.edit_message_text(msg.chat.id, status_msg.id, confirmation)
+        .await?;
+
+    Ok(())
+}
+
+fn enforce_url_limit(urls: Vec<DetectedUrl>, max_urls: usize) -> (Vec<DetectedUrl>, bool) {
+    if urls.len() > max_urls {
+        warn!(
+            total_urls = urls.len(),
+            max_urls = max_urls,
+            "Message contains more URLs than configured limit, truncating"
+        );
+        (urls.into_iter().take(max_urls).collect(), true)
+    } else {
+        (urls, false)
+    }
+}
+
+fn build_processing_message(count: usize) -> String {
+    format!("🔗 Processing {} link(s)...", count)
+}
+
+fn build_confirmation_message(
+    success_count: usize,
+    processed_count: usize,
+    total_urls: usize,
+    max_urls: usize,
+    truncated: bool,
+    results: &[String],
+) -> String {
+    let mut confirmation = if success_count == processed_count {
+        format!("📝 Saved {} URL(s) as TODO(s)", success_count)
+    } else {
+        format!(
+            "📝 Saved {}/{} URL(s) as TODO(s)",
+            success_count, processed_count
+        )
+    };
+
+    if truncated {
+        confirmation.push_str(&format!(
+            "\n\n⚠️ Message contained {} URLs (max: {}). Only processed first {}.",
+            total_urls, max_urls, max_urls
+        ));
+    }
+
+    if !results.is_empty() {
+        confirmation.push_str("\n\n");
+        confirmation.push_str(&results.join("\n"));
+    }
+
+    confirmation
+}
+
+fn format_result_item(title: Option<&str>, url: &str, success: bool) -> String {
+    let label = title.unwrap_or(url).chars().take(50).collect::<String>();
+    if success {
+        format!("✅ {}", label)
+    } else {
+        format!("❌ {} (write failed)", label)
+    }
+}
+
+async fn fetch_for_url_type(
+    detected_url: &DetectedUrl,
+    config: &Config,
+) -> Result<PageContent, Box<dyn std::error::Error + Send + Sync>> {
+    match &detected_url.url_type {
+        UrlType::YouTube { video_id } => {
+            let metadata = fetch_youtube_metadata(&detected_url.url, config.url.fetch_timeout_secs)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+            info!(
+                video_id = %video_id,
+                fetched_video_id = %metadata.video_id,
+                title = %metadata.title,
+                has_thumbnail = metadata.thumbnail_url.is_some(),
+                "Fetched YouTube metadata"
+            );
+
+            let body_text = format!("{}\n\nBy: {}", metadata.title, metadata.author);
+            Ok(PageContent {
+                title: Some(metadata.title),
+                description: Some(format!("YouTube video by {}", metadata.author)),
+                body_text,
+                url: detected_url.url.clone(),
+            })
+        }
+        UrlType::WebPage => {
+            let page = fetch_page_content(
+                &detected_url.url,
+                config.url.fetch_timeout_secs,
+                config.url.max_content_bytes,
+            )
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+
+            info!(
+                url = %detected_url.url,
+                title = ?page.title,
+                body_length = page.body_text.len(),
+                "Fetched page content"
+            );
+
+            Ok(page)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_handler_basic_structure() {
+        let _fn_ref = handle_url_message;
+    }
+
+    #[test]
+    fn test_format_multiple_url_confirmations() {
+        let results = vec![
+            "✅ Example Page".to_string(),
+            "✅ Another Page".to_string(),
+            "❌ https://broken.example.com (write failed)".to_string(),
+        ];
+
+        let confirmation = build_confirmation_message(2, 3, 3, 5, false, &results);
+
+        assert!(confirmation.contains("Saved 2/3 URL(s) as TODO(s)"));
+        assert!(confirmation.contains("✅ Example Page"));
+        assert!(confirmation.contains("✅ Another Page"));
+        assert!(confirmation.contains("❌ https://broken.example.com"));
+    }
+
+    #[test]
+    fn test_url_limit_enforcement() {
+        let urls = (1..=10)
+            .map(|i| DetectedUrl {
+                url: format!("https://example.com/{}", i),
+                url_type: UrlType::WebPage,
+                start: 0,
+                end: 0,
+            })
+            .collect::<Vec<_>>();
+
+        let (urls_to_process, truncated) = enforce_url_limit(urls, 5);
+
+        assert_eq!(urls_to_process.len(), 5);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn test_processing_message_format() {
+        assert_eq!(build_processing_message(1), "🔗 Processing 1 link(s)...");
+        assert_eq!(build_processing_message(3), "🔗 Processing 3 link(s)...");
+    }
+
+    #[test]
+    fn test_confirmation_includes_truncation_warning() {
+        let confirmation = build_confirmation_message(
+            5,
+            5,
+            10,
+            5,
+            true,
+            &["✅ One".to_string(), "✅ Two".to_string()],
+        );
+
+        assert!(confirmation.contains("Saved 5 URL(s) as TODO(s)"));
+        assert!(confirmation.contains("Message contained 10 URLs (max: 5)"));
+        assert!(confirmation.contains("✅ One"));
+    }
+
+    #[test]
+    fn test_format_result_item_uses_title_or_url() {
+        let with_title = format_result_item(Some("Readable title"), "https://example.com", true);
+        let with_url = format_result_item(None, "https://example.com/path", false);
+
+        assert_eq!(with_title, "✅ Readable title");
+        assert!(with_url.starts_with("❌ https://example.com/path"));
+        assert!(with_url.ends_with("(write failed)"));
+    }
+}
