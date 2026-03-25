@@ -6,3 +6,4 @@ config.docker.yaml
 .sisyphus/
 *.oga
 *.wav
+Obsidian/
