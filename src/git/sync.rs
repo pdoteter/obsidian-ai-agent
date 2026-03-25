@@ -266,6 +266,9 @@ impl GitSync {
         let remote_ref = format!("{}/{}", self.remote_name, self.branch);
         self.run_git(&["reset", "--hard", &remote_ref])?;
 
+        // Push (no-op when already aligned with remote)
+        self.run_git(&["push"])?;
+
         // Verify clean state
         self.verify_clean_state()?;
 
