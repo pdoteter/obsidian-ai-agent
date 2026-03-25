@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use teloxide::prelude::*;
-use teloxide::types::ChatAction;
+use teloxide::types::{CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup};
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
@@ -14,6 +17,15 @@ use crate::url::youtube::fetch_youtube_metadata;
 use crate::url::PageContent;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
+
+#[derive(Clone, Debug)]
+pub struct TranscriptRequest {
+    pub video_id: String,
+    pub url: String,
+    pub title: String,
+}
+
+pub type TranscriptPending = Arc<Mutex<HashMap<String, TranscriptRequest>>>;
 
 /// Handle URLs found in Telegram messages
 ///
@@ -27,6 +39,7 @@ pub async fn handle_url_message(
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
+    transcript_pending: TranscriptPending,
     urls: Vec<DetectedUrl>,
     surrounding_text: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -61,6 +74,7 @@ pub async fn handle_url_message(
     // 4) process each URL with graceful degradation
     let mut success_count = 0usize;
     let mut results = Vec::new();
+    let mut transcript_buttons: Vec<InlineKeyboardButton> = Vec::new();
 
     for detected_url in &urls_to_process {
         bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
@@ -70,6 +84,28 @@ pub async fn handle_url_message(
         let (title_for_todo, summary_for_todo, tags_for_todo) = match fetched_page {
             Ok(page_content) => {
                 let fetched_title = page_content.title.clone();
+
+                if let UrlType::YouTube { video_id } = &detected_url.url_type {
+                    let short_id = Uuid::new_v4().to_string()[..8].to_string();
+                    let title_for_request = fetched_title
+                        .clone()
+                        .unwrap_or_else(|| detected_url.url.clone());
+
+                    transcript_pending.lock().await.insert(
+                        short_id.clone(),
+                        TranscriptRequest {
+                            video_id: video_id.clone(),
+                            url: detected_url.url.clone(),
+                            title: title_for_request,
+                        },
+                    );
+
+                    transcript_buttons.push(InlineKeyboardButton::callback(
+                        "📝 Full Transcript",
+                        format!("yt_transcript:{}", short_id),
+                    ));
+                }
+
                 let guide = crate::ai::guide::load_guide(&config.guide_path);
 
                 match ai_client
@@ -153,8 +189,135 @@ pub async fn handle_url_message(
         &results,
     );
 
-    bot.edit_message_text(msg.chat.id, status_msg.id, confirmation)
+    if transcript_buttons.is_empty() {
+        bot.edit_message_text(msg.chat.id, status_msg.id, confirmation)
+            .await?;
+    } else {
+        let rows: Vec<Vec<InlineKeyboardButton>> = transcript_buttons
+            .into_iter()
+            .map(|button| vec![button])
+            .collect();
+        let keyboard = InlineKeyboardMarkup::new(rows);
+
+        bot.edit_message_text(msg.chat.id, status_msg.id, confirmation)
+            .reply_markup(keyboard)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_transcript_callback(
+    bot: Bot,
+    q: CallbackQuery,
+    transcript_pending: TranscriptPending,
+    ai_client: Arc<OpenRouterClient>,
+    vault: Arc<DailyNoteManager>,
+    config: Arc<Config>,
+    sync_notifier: Option<SyncNotifier>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let data = q.data.as_ref().ok_or("No callback data")?;
+    let short_id = data
+        .strip_prefix("yt_transcript:")
+        .ok_or("Invalid callback format")?;
+
+    // Acknowledge callback immediately to stop Telegram loading spinner.
+    bot.answer_callback_query(&q.id).await?;
+
+    let chat_id = q.message.as_ref().map(|m| m.chat().id);
+
+    let request = {
+        let mut pending = transcript_pending.lock().await;
+        pending.remove(short_id)
+    };
+
+    let request = match request {
+        Some(req) => req,
+        None => {
+            if let Some(chat_id) = chat_id {
+                bot.send_message(
+                    chat_id,
+                    "❌ Transcript request expired or not found. Please resend the YouTube link.",
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+    };
+
+    if let Some(chat_id) = chat_id {
+        bot.send_message(chat_id, "⏳ Fetching transcript...").await?;
+
+        let transcript_text = match crate::url::fetch_transcript(&request.video_id).await {
+            Ok(text) => text,
+            Err(e) => {
+                bot.send_message(chat_id, format!("❌ Failed to fetch transcript: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        let page_content = crate::url::PageContent {
+            title: Some(request.title.clone()),
+            description: Some("YouTube video transcript".to_string()),
+            body_text: transcript_text.clone(),
+            url: request.url.clone(),
+        };
+
+        let guide = crate::ai::guide::load_guide(&config.guide_path);
+        let summary = match ai_client
+            .summarize_url(
+                &page_content,
+                None,
+                &config.openrouter_model_classify,
+                guide.as_deref(),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                bot.send_message(chat_id, format!("❌ Failed to summarize transcript: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let transcript_file = match crate::vault::save_transcript(
+            std::path::Path::new(&config.vault_path),
+            &config.url.transcript_folder,
+            &request.video_id,
+            &request.title,
+            &summary.summary,
+            &transcript_text,
+            &date,
+        )
+        .await
+        {
+            Ok(file) => file,
+            Err(e) => {
+                bot.send_message(chat_id, format!("❌ Failed to save transcript: {}", e))
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
+        if let Err(e) = vault.append_to_section("## ✅ Todos", &wiki_link_entry).await {
+            warn!(error = %e, "Failed to add wiki-link to daily note");
+        }
+
+        if let Some(ref notifier) = sync_notifier {
+            notifier.notify();
+        }
+
+        bot.send_message(
+            chat_id,
+            format!("✅ Transcript saved: {}", transcript_file.wiki_link),
+        )
         .await?;
+    }
 
     Ok(())
 }

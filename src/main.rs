@@ -9,9 +9,11 @@ mod url;
 mod vault;
 
 use std::sync::Arc;
+use std::collections::HashMap;
 
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use ai::client::OpenRouterClient;
@@ -21,6 +23,7 @@ use git::chat_tracker;
 use git::conflict;
 use git::debounce;
 use git::sync::GitSync;
+use handlers::url::TranscriptPending;
 use vault::daily_note::DailyNoteManager;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -87,6 +90,9 @@ async fn main() {
     // Initialize chat_id tracker
     let chat_tracker = chat_tracker::ChatIdTracker::new();
 
+    // Pending transcript requests for inline callback workflow
+    let transcript_pending: TranscriptPending = Arc::new(Mutex::new(HashMap::new()));
+
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
         let git_path = config.git_path.clone().expect("GIT_PATH required when git sync enabled");
@@ -131,7 +137,8 @@ async fn main() {
             vault.clone(),
             sync_notifier.clone(),
             conflict_pending.clone(),
-            chat_tracker.clone()
+            chat_tracker.clone(),
+            transcript_pending.clone()
         ])
         .default_handler(|upd| async move {
             warn!(update_id = upd.id.0, "Unhandled update");
@@ -163,6 +170,7 @@ async fn handle_message(
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
     chat_tracker: chat_tracker::ChatIdTracker,
+    transcript_pending: TranscriptPending,
 ) -> HandlerResult {
     // Route based on message content type
     if msg.photo().is_some() {
@@ -172,7 +180,17 @@ async fn handle_message(
         handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier, chat_tracker)
             .await
     } else if msg.text().is_some() {
-        handlers::text::handle_text_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker).await
+        handlers::text::handle_text_message(
+            bot,
+            msg,
+            config,
+            ai_client,
+            vault,
+            sync_notifier,
+            chat_tracker,
+            transcript_pending,
+        )
+        .await
     } else {
         bot.send_message(
             msg.chat.id,
@@ -194,6 +212,33 @@ async fn handle_callback(
             >,
         >,
     >,
+    transcript_pending: TranscriptPending,
+    config: Arc<Config>,
+    ai_client: Arc<OpenRouterClient>,
+    vault: Arc<DailyNoteManager>,
+    sync_notifier: Option<debounce::SyncNotifier>,
 ) -> HandlerResult {
-    conflict::handle_conflict_callback(bot, q, conflict_pending).await
+    if let Some(ref data) = q.data {
+        if data.starts_with("yt_transcript:") {
+            return handlers::url::handle_transcript_callback(
+                bot,
+                q,
+                transcript_pending,
+                ai_client,
+                vault,
+                config,
+                sync_notifier,
+            )
+            .await
+            .map_err(Into::into);
+        } else if data.starts_with("conflict:") {
+            return conflict::handle_conflict_callback(bot, q, conflict_pending).await;
+        }
+    }
+
+    if let Some(ref data) = q.data {
+        warn!(callback_data = %data, "Unknown callback type");
+    }
+    bot.answer_callback_query(&q.id).await?;
+    Ok(())
 }

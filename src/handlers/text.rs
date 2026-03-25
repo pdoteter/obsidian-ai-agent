@@ -7,6 +7,7 @@ use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
+use crate::handlers::url::TranscriptPending;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
 
@@ -19,6 +20,7 @@ pub async fn handle_text_message(
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
+    transcript_pending: TranscriptPending,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let text = match msg.text() {
         Some(t) => t.to_string(),
@@ -42,6 +44,7 @@ pub async fn handle_text_message(
             vault,
             sync_notifier,
             chat_tracker,
+            transcript_pending,
             detected_urls,
             surrounding_text,
         )
