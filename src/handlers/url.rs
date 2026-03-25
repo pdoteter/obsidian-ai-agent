@@ -79,6 +79,119 @@ pub async fn handle_url_message(
     for detected_url in &urls_to_process {
         bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
+        // Check if this is a YouTube URL with transcript keyword
+        let is_transcript_direct_flow = if let UrlType::YouTube { video_id: _ } = &detected_url.url_type {
+            let is_transcript_req = crate::url::is_transcript_request(
+                surrounding_text.as_deref().unwrap_or(&msg.text().unwrap_or("")),
+            );
+            is_transcript_req
+        } else {
+            false
+        };
+
+        // Direct transcript flow for keyword-triggered requests
+        if is_transcript_direct_flow {
+            if let UrlType::YouTube { video_id } = &detected_url.url_type {
+                bot.send_message(msg.chat.id, "⏳ Fetching transcript...")
+                    .await?;
+
+                let transcript_text = match crate::url::fetch_transcript(video_id).await {
+                    Ok(text) => text,
+                    Err(e) => {
+                        error!(error = %e, video_id = %video_id, "Failed to fetch transcript");
+                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch transcript: {}", e))
+                            .await?;
+                        continue;
+                    }
+                };
+
+                // Fetch metadata for title
+                let fetched_page = match fetch_for_url_type(detected_url, &config).await {
+                    Ok(page) => page,
+                    Err(e) => {
+                        error!(error = %e, url = %detected_url.url, "Failed to fetch YouTube metadata");
+                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch video metadata: {}", e))
+                            .await?;
+                        continue;
+                    }
+                };
+
+                let page_content = crate::url::PageContent {
+                    title: fetched_page.title.clone(),
+                    description: Some("YouTube video transcript".to_string()),
+                    body_text: transcript_text.clone(),
+                    url: detected_url.url.clone(),
+                };
+
+                let guide = crate::ai::guide::load_guide(&config.guide_path);
+                let summary = match ai_client
+                    .summarize_url(
+                        &page_content,
+                        None,
+                        &config.openrouter_model_classify,
+                        guide.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!(error = %e, url = %detected_url.url, "Failed to summarize transcript");
+                        bot.send_message(msg.chat.id, format!("❌ Failed to summarize transcript: {}", e))
+                            .await?;
+                        continue;
+                    }
+                };
+
+                let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+                let video_title = fetched_page.title.clone()
+                    .unwrap_or_else(|| detected_url.url.clone());
+
+                let transcript_file = match crate::vault::save_transcript(
+                    std::path::Path::new(&config.vault_path),
+                    &config.url.transcript_folder,
+                    video_id,
+                    &video_title,
+                    &summary.summary,
+                    &transcript_text,
+                    &date,
+                )
+                .await
+                {
+                    Ok(file) => file,
+                    Err(e) => {
+                        error!(error = %e, video_id = %video_id, "Failed to save transcript");
+                        bot.send_message(msg.chat.id, format!("❌ Failed to save transcript: {}", e))
+                            .await?;
+                        continue;
+                    }
+                };
+
+                let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
+                if let Err(e) = vault.append_to_section("## ✅ Todos", &wiki_link_entry).await {
+                    warn!(error = %e, "Failed to add transcript wiki-link to daily note");
+                }
+
+                if let Some(ref notifier) = sync_notifier {
+                    notifier.notify();
+                }
+
+                bot.send_message(
+                    msg.chat.id,
+                    format!("✅ Transcript saved: {}", transcript_file.wiki_link),
+                )
+                .await?;
+
+                success_count += 1;
+                results.push(format_result_item(
+                    Some(&video_title),
+                    &detected_url.url,
+                    true,
+                ));
+            }
+            continue;
+        }
+
+        // Normal fast-mode flow for non-transcript URLs
         let fetched_page = fetch_for_url_type(detected_url, &config).await;
 
         let (title_for_todo, summary_for_todo, tags_for_todo) = match fetched_page {
@@ -86,33 +199,25 @@ pub async fn handle_url_message(
                 let fetched_title = page_content.title.clone();
 
                 if let UrlType::YouTube { video_id } = &detected_url.url_type {
-                    // Check if user requested full transcript via keyword
-                    let is_transcript_req = crate::url::is_transcript_request(
-                        surrounding_text.as_deref().unwrap_or(&msg.text().unwrap_or("")),
+                    // Show button for manual transcript request (not keyword-triggered)
+                    let short_id = Uuid::new_v4().to_string()[..8].to_string();
+                    let title_for_request = fetched_title
+                        .clone()
+                        .unwrap_or_else(|| detected_url.url.clone());
+
+                    transcript_pending.lock().await.insert(
+                        short_id.clone(),
+                        TranscriptRequest {
+                            video_id: video_id.clone(),
+                            url: detected_url.url.clone(),
+                            title: title_for_request,
+                        },
                     );
 
-                    if !is_transcript_req {
-                        // For non-keyword messages: show button for manual transcript request
-                        let short_id = Uuid::new_v4().to_string()[..8].to_string();
-                        let title_for_request = fetched_title
-                            .clone()
-                            .unwrap_or_else(|| detected_url.url.clone());
-
-                        transcript_pending.lock().await.insert(
-                            short_id.clone(),
-                            TranscriptRequest {
-                                video_id: video_id.clone(),
-                                url: detected_url.url.clone(),
-                                title: title_for_request,
-                            },
-                        );
-
-                        transcript_buttons.push(InlineKeyboardButton::callback(
-                            "📝 Full Transcript",
-                            format!("yt_transcript:{}", short_id),
-                        ));
-                    }
-                    // For transcript keyword: skip button, will be handled by full transcript flow later
+                    transcript_buttons.push(InlineKeyboardButton::callback(
+                        "📝 Full Transcript",
+                        format!("yt_transcript:{}", short_id),
+                    ));
                 }
 
                 let guide = crate::ai::guide::load_guide(&config.guide_path);
