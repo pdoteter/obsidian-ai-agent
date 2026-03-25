@@ -302,6 +302,8 @@ pub async fn handle_url_message(
         truncated,
         &results,
     );
+    
+    let confirmation = truncate_confirmation_if_needed(confirmation);
 
     if transcript_buttons.is_empty() {
         bot.edit_message_text(msg.chat.id, status_msg.id, confirmation)
@@ -453,6 +455,8 @@ fn build_processing_message(count: usize) -> String {
     format!("🔗 Processing {} link(s)...", count)
 }
 
+const TELEGRAM_MAX_MESSAGE_LENGTH: usize = 4096;
+
 fn build_confirmation_message(
     success_count: usize,
     processed_count: usize,
@@ -483,6 +487,61 @@ fn build_confirmation_message(
     }
 
     confirmation
+}
+
+fn truncate_confirmation_if_needed(confirmation: String) -> String {
+    if confirmation.len() <= TELEGRAM_MAX_MESSAGE_LENGTH {
+        return confirmation;
+    }
+
+    // Split into lines to identify header vs results
+    let lines: Vec<&str> = confirmation.split('\n').collect();
+    
+    // Find where results section starts (first line with ✅ or ❌)
+    let mut header_end_idx = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains("✅") || line.contains("❌") {
+            header_end_idx = i;
+            break;
+        }
+    }
+
+    // If no result lines found, just hard truncate the entire message
+    if header_end_idx == 0 {
+        let mut result = confirmation;
+        if result.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
+            result.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
+            result.push_str("...");
+        }
+        return result;
+    }
+
+    // Keep header, progressively remove result lines from the end
+    let header_lines = &lines[..header_end_idx];
+    let result_lines = &lines[header_end_idx..];
+    
+    let mut kept_results = result_lines.len();
+    let mut message = header_lines.join("\n") + "\n\n" + &result_lines.join("\n");
+
+    while message.len() > TELEGRAM_MAX_MESSAGE_LENGTH && kept_results > 0 {
+        kept_results -= 1;
+        message = header_lines.join("\n") + "\n\n" + &result_lines[..kept_results].join("\n");
+    }
+
+    let removed_count = result_lines.len() - kept_results;
+    
+    // Add truncation notice if results were removed
+    if removed_count > 0 {
+        message.push_str(&format!("\n\n... ({} more URLs not shown)", removed_count));
+    }
+
+    // Final safety: hard truncate if still too long
+    if message.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
+        message.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
+        message.push_str("...");
+    }
+
+    message
 }
 
 fn format_result_item(title: Option<&str>, url: &str, success: bool) -> String {
