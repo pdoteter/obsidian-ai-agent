@@ -86,24 +86,33 @@ pub async fn handle_url_message(
                 let fetched_title = page_content.title.clone();
 
                 if let UrlType::YouTube { video_id } = &detected_url.url_type {
-                    let short_id = Uuid::new_v4().to_string()[..8].to_string();
-                    let title_for_request = fetched_title
-                        .clone()
-                        .unwrap_or_else(|| detected_url.url.clone());
-
-                    transcript_pending.lock().await.insert(
-                        short_id.clone(),
-                        TranscriptRequest {
-                            video_id: video_id.clone(),
-                            url: detected_url.url.clone(),
-                            title: title_for_request,
-                        },
+                    // Check if user requested full transcript via keyword
+                    let is_transcript_req = crate::url::is_transcript_request(
+                        surrounding_text.as_deref().unwrap_or(&msg.text().unwrap_or("")),
                     );
 
-                    transcript_buttons.push(InlineKeyboardButton::callback(
-                        "📝 Full Transcript",
-                        format!("yt_transcript:{}", short_id),
-                    ));
+                    if !is_transcript_req {
+                        // For non-keyword messages: show button for manual transcript request
+                        let short_id = Uuid::new_v4().to_string()[..8].to_string();
+                        let title_for_request = fetched_title
+                            .clone()
+                            .unwrap_or_else(|| detected_url.url.clone());
+
+                        transcript_pending.lock().await.insert(
+                            short_id.clone(),
+                            TranscriptRequest {
+                                video_id: video_id.clone(),
+                                url: detected_url.url.clone(),
+                                title: title_for_request,
+                            },
+                        );
+
+                        transcript_buttons.push(InlineKeyboardButton::callback(
+                            "📝 Full Transcript",
+                            format!("yt_transcript:{}", short_id),
+                        ));
+                    }
+                    // For transcript keyword: skip button, will be handled by full transcript flow later
                 }
 
                 let guide = crate::ai::guide::load_guide(&config.guide_path);

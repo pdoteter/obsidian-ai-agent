@@ -85,6 +85,11 @@ fn is_youtube_domain(host: &str) -> bool {
     )
 }
 
+/// Check if a message contains a "transcript" keyword (case-insensitive)
+pub fn is_transcript_request(text: &str) -> bool {
+    text.to_lowercase().contains("transcript")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +265,35 @@ mod tests {
                 video_id: "abc123XYZ".to_string()
             }
         );
+    }
+
+    #[test]
+    fn test_transcript_keyword_detected_lowercase() {
+        let text = "transcript https://youtube.com/watch?v=abc123";
+        assert!(is_transcript_request(text));
+    }
+
+    #[test]
+    fn test_transcript_keyword_detected_uppercase() {
+        let text = "Transcript https://youtu.be/abc123";
+        assert!(is_transcript_request(text));
+    }
+
+    #[test]
+    fn test_transcript_keyword_in_sentence() {
+        let text = "get me the transcript for https://youtube.com/watch?v=abc123";
+        assert!(is_transcript_request(text));
+    }
+
+    #[test]
+    fn test_no_transcript_keyword_returns_false() {
+        let text = "https://youtube.com/watch?v=abc123";
+        assert!(!is_transcript_request(text));
+    }
+
+    #[test]
+    fn test_transcript_keyword_mixed_case() {
+        let text = "TrAnScRiPt https://youtu.be/abc123";
+        assert!(is_transcript_request(text));
     }
 }
