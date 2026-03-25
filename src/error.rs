@@ -1,31 +1,5 @@
 use std::path::PathBuf;
 
-/// Top-level application error type
-#[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
-pub enum AppError {
-    #[error("Configuration error: {0}")]
-    Config(#[from] crate::config::ConfigError),
-
-    #[error("Telegram error: {0}")]
-    Telegram(#[from] teloxide::RequestError),
-
-    #[error("Audio processing error: {0}")]
-    Audio(#[from] AudioError),
-
-    #[error("AI/OpenRouter error: {0}")]
-    Ai(#[from] AiError),
-
-    #[error("Vault error: {0}")]
-    Vault(#[from] VaultError),
-
-    #[error("Git error: {0}")]
-    Git(#[from] GitError),
-
-    #[error("Image processing error: {0}")]
-    Image(#[from] ImageError),
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum AudioError {
     #[error("Failed to download file from Telegram: {0}")]
@@ -52,6 +26,24 @@ pub enum ImageError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UrlError {
+    #[error("Failed to fetch URL: {url} — {reason}")]
+    FetchFailed { url: String, reason: String },
+
+    #[error("Failed to parse page content: {0}")]
+    ParseFailed(String),
+
+    #[error("Failed to fetch transcript for: {video_id} — {reason}")]
+    TranscriptFailed { video_id: String, reason: String },
+
+    #[error("URL fetch timed out after {timeout_secs}s: {url}")]
+    Timeout { url: String, timeout_secs: u64 },
+
+    #[error("Content too large ({size} bytes): {url}")]
+    ContentTooLarge { url: String, size: usize },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -111,6 +103,35 @@ pub enum GitError {
 
     #[error("SSH authentication failed: {0}")]
     SshAuthFailed(String),
+}
+
+/// Top-level application error type
+#[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
+pub enum AppError {
+    #[error("Configuration error: {0}")]
+    Config(#[from] crate::config::ConfigError),
+
+    #[error("Telegram error: {0}")]
+    Telegram(#[from] teloxide::RequestError),
+
+    #[error("Audio processing error: {0}")]
+    Audio(#[from] AudioError),
+
+    #[error("AI/OpenRouter error: {0}")]
+    Ai(#[from] AiError),
+
+    #[error("Vault error: {0}")]
+    Vault(#[from] VaultError),
+
+    #[error("Git error: {0}")]
+    Git(#[from] GitError),
+
+    #[error("Image processing error: {0}")]
+    Image(#[from] ImageError),
+
+    #[error("URL processing error: {0}")]
+    Url(#[from] UrlError),
 }
 
 /// Convenience type alias
