@@ -51,6 +51,12 @@ base64 = "0.22"
 # EXIF extraction (for image metadata)
 kamadak-exif = "0.5"
 
+# URL handling
+linkify = "0.10"
+url = "2"
+scraper = "0.21"
+regex = "1"
+
 [profile.release]
 opt-level = 3
 lto = true
