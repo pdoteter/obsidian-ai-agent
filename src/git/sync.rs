@@ -242,6 +242,40 @@ impl GitSync {
         Ok(())
     }
 
+    /// Resolve conflict by keeping our local version and force pushing
+    pub fn resolve_ours(&self) -> Result<(), GitError> {
+        // Defensive abort in case rebase is still active
+        let _ = self.run_git(&["rebase", "--abort"]);
+
+        // Force push our local version
+        self.force_push()?;
+
+        info!("Resolved conflict using local version (ours)");
+        Ok(())
+    }
+
+    /// Resolve conflict by accepting remote version and discarding local changes
+    pub fn resolve_theirs(&self) -> Result<(), GitError> {
+        // Defensive abort
+        let _ = self.run_git(&["rebase", "--abort"]);
+
+        // Reset to remote state
+        let remote_ref = format!("{}/{}", self.remote_name, self.branch);
+        self.run_git(&["reset", "--hard", &remote_ref])?;
+
+        info!("Resolved conflict using remote version (theirs)");
+        Ok(())
+    }
+
+    /// Abort conflict resolution - leave repo as-is
+    pub fn resolve_abort(&self) -> Result<(), GitError> {
+        // Defensive abort
+        let _ = self.run_git(&["rebase", "--abort"]);
+
+        info!("Conflict resolution aborted by user");
+        Ok(())
+    }
+
     /// Full sync cycle: stage → commit → fetch → rebase → push
     pub fn full_sync(&self) -> Result<SyncResult, GitError> {
         // Stage and commit local changes
