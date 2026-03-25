@@ -8,6 +8,7 @@ Telegram bot that converts text, voice, and photo messages into structured Obsid
 - Telegram Bot Token ([BotFather](https://t.me/BotFather))
 - OpenRouter API Key ([openrouter.ai](https://openrouter.ai))
 - OpenAI API Key ([platform.openai.com](https://platform.openai.com)) — for Whisper transcription
+- yt-dlp (optional) — for YouTube full transcript extraction
 
 ## Setup
 
@@ -25,6 +26,26 @@ Send photos via Telegram to automatically:
 - Append to daily note with Obsidian wiki link
 
 Photos are processed through the same classification pipeline as text/voice messages, including frontmatter extraction and guide support.
+
+## URL Messages
+
+Send any URL via Telegram to automatically create a TODO entry in your daily note with an AI-generated summary.
+
+### Features
+- **Automatic Detection**: Finds URLs within any text message.
+- **Web Extraction**: Fetches page titles and content for summarization.
+- **YouTube Fast Mode**: Uses metadata for instant summaries (default).
+- **YouTube Transcripts**: Extract full transcripts via the "📝 Full Transcript" button or by including the "transcript" keyword in your message.
+- **Transcript Storage**: Transcripts are saved as separate markdown files in your vault with wiki-links from the daily note.
+- **Multiple URLs**: Process up to 5 URLs per message, each getting its own TODO entry.
+- **Graceful Degradation**: If content fetching fails, the URL is still saved as a plain TODO.
+
+**Format**:
+```markdown
+- [ ] [Title](url)
+  > AI summary of the page content
+  #tags
+```
 
 ## Docker
 
@@ -143,6 +164,10 @@ log_level: info                             # default: info
 | `image.max_dimension` | ❌ | Maximum image dimension in pixels (default: 1280) |
 | `image.jpeg_quality` | ❌ | JPEG compression quality 1-100 (default: 85) |
 | `image.assets_folder` | ❌ | Folder name for saved images (default: `assets`) |
+| `url.transcript_folder` | ❌ | Folder for YouTube transcript files (default: `transcripts`) |
+| `url.fetch_timeout_secs` | ❌ | URL fetch timeout in seconds (default: 15) |
+| `url.max_content_bytes` | ❌ | Maximum content size in bytes (default: 524288 = 512KB) |
+| `url.max_urls_per_message` | ❌ | Maximum URLs to process per message (default: 5) |
 | `timezone` | ❌ | Timezone for timestamps (default: `Europe/Brussels`) |
 | `date_display_format` | ❌ | Moment.js format for dates (default: `YYYY/MM/DD`) |
 | `log_level` | ❌ | Log level (default: `info`) |

@@ -33,6 +33,13 @@ access:
 #   jpeg_quality: 85                      # JPEG compression quality 1-100 (default: 85)
 #   assets_folder: assets                 # Folder name for saved images (default: assets)
 
+# URL processing settings (optional — defaults shown)
+url:
+  transcript_folder: transcripts         # default: transcripts
+  fetch_timeout_secs: 15                 # default: 15
+  max_content_bytes: 524288              # default: 524288 (512KB)
+  max_urls_per_message: 5                # default: 5
+
 # Timezone for timestamps in daily notes (IANA format)
 timezone: Europe/Brussels
 
