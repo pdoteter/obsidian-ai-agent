@@ -92,7 +92,7 @@ pub fn spawn_debounced_sync(
                             SyncResult::NothingToSync => {
                                 info!("Git sync: nothing to sync");
                             }
-                            SyncResult::ConflictDetected => {
+                            SyncResult::ConflictDetected(_info) => {
                                 warn!("Git sync: conflict detected — manual resolution needed");
                                 // TODO: trigger conflict resolution via Telegram
                             }

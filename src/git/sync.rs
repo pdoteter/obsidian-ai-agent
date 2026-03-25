@@ -1,4 +1,5 @@
 use chrono::Local;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::{error, info, warn};
@@ -258,7 +259,12 @@ impl GitSync {
             info!("Remote has new commits, rebasing");
             let rebase_ok = self.rebase()?;
             if !rebase_ok {
-                return Ok(SyncResult::ConflictDetected);
+                return Ok(SyncResult::ConflictDetected(ConflictInfo {
+                    files: vec![],
+                    diff_output: String::new(),
+                    ours_contents: HashMap::new(),
+                    theirs_contents: HashMap::new(),
+                }));
             }
             // After rebase, force push
             self.force_push()?;
@@ -288,12 +294,24 @@ impl GitSync {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConflictInfo {
+    /// List of conflicted file paths
+    pub files: Vec<String>,
+    /// Unified diff output from `git diff` (captured during conflict)
+    pub diff_output: String,
+    /// Local version of each conflicted file (from HEAD)
+    pub ours_contents: HashMap<String, String>,
+    /// Remote version of each conflicted file (from REBASE_HEAD)
+    pub theirs_contents: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
 pub enum SyncResult {
     NothingToSync,
     Pushed,
     PushedWithoutFetch,
     RebasedAndPushed,
-    ConflictDetected,
+    ConflictDetected(ConflictInfo),
 }
 
 impl std::fmt::Display for SyncResult {
@@ -303,7 +321,9 @@ impl std::fmt::Display for SyncResult {
             SyncResult::Pushed => write!(f, "Changes pushed"),
             SyncResult::PushedWithoutFetch => write!(f, "Pushed (fetch failed)"),
             SyncResult::RebasedAndPushed => write!(f, "Rebased and pushed"),
-            SyncResult::ConflictDetected => write!(f, "Conflict detected"),
+            SyncResult::ConflictDetected(ref info) => {
+                write!(f, "Conflict detected in {} file(s)", info.files.len())
+            }
         }
     }
 }
