@@ -173,8 +173,8 @@ impl GitSync {
     }
 
     /// Perform rebase of local commits on top of remote.
-    /// Returns Ok(true) if rebase succeeded, Ok(false) if conflicts detected.
-    pub fn rebase(&self) -> Result<bool, GitError> {
+    /// Returns RebaseResult::Success or RebaseResult::Conflict with captured data.
+    pub fn rebase(&self) -> Result<RebaseResult, GitError> {
         let remote_ref = format!("{}/{}", self.remote_name, self.branch);
 
         info!(upstream = %remote_ref, "Rebasing onto remote");
@@ -182,18 +182,23 @@ impl GitSync {
         match self.run_git(&["rebase", &remote_ref]) {
             Ok(_) => {
                 info!("Rebase completed successfully");
-                Ok(true)
+                Ok(RebaseResult::Success)
             }
             Err(e) => {
                 // Check if it's a conflict
                 let status = self.run_git(&["status", "--porcelain"]).unwrap_or_default();
                 if status.contains("UU ") || status.contains("AA ") || status.contains("DD ") {
                     warn!("Conflict detected during rebase");
+
+                    // Capture conflict details BEFORE aborting rebase
+                    let info = self.capture_conflict_info()?;
+
                     // Abort the rebase
                     if let Err(abort_err) = self.run_git(&["rebase", "--abort"]) {
                         error!(error = %abort_err, "Failed to abort rebase");
                     }
-                    return Ok(false);
+
+                    return Ok(RebaseResult::Conflict(info));
                 }
 
                 // Not a conflict — actual error
@@ -257,14 +262,11 @@ impl GitSync {
         // Check if rebase is needed
         if self.needs_rebase()? {
             info!("Remote has new commits, rebasing");
-            let rebase_ok = self.rebase()?;
-            if !rebase_ok {
-                return Ok(SyncResult::ConflictDetected(ConflictInfo {
-                    files: vec![],
-                    diff_output: String::new(),
-                    ours_contents: HashMap::new(),
-                    theirs_contents: HashMap::new(),
-                }));
+            match self.rebase()? {
+                RebaseResult::Conflict(info) => {
+                    return Ok(SyncResult::ConflictDetected(info));
+                }
+                RebaseResult::Success => {}
             }
             // After rebase, force push
             self.force_push()?;
@@ -281,7 +283,6 @@ impl GitSync {
     }
 
     /// Get list of conflicted files (for conflict resolution UI)
-    #[allow(dead_code)]
     pub fn get_conflicted_files(&self) -> Result<Vec<String>, GitError> {
         let output = self.run_git(&["diff", "--name-only", "--diff-filter=U"])?;
         let conflicts: Vec<String> = output
@@ -291,6 +292,52 @@ impl GitSync {
             .collect();
         Ok(conflicts)
     }
+
+    /// Capture conflict information during an active rebase conflict.
+    /// Must be called BEFORE `rebase --abort` since git show REBASE_HEAD
+    /// requires an active rebase state.
+    fn capture_conflict_info(&self) -> Result<ConflictInfo, GitError> {
+        let files = self.get_conflicted_files()?;
+
+        let mut ours_contents = HashMap::new();
+        let mut theirs_contents = HashMap::new();
+
+        for filepath in &files {
+            // Capture local (HEAD) version — empty string fallback for binary/new files
+            let ours = self
+                .run_git(&["show", &format!("HEAD:{}", filepath)])
+                .unwrap_or_default();
+            ours_contents.insert(filepath.clone(), ours);
+
+            // Capture remote (REBASE_HEAD) version — empty string fallback
+            let theirs = self
+                .run_git(&["show", &format!("REBASE_HEAD:{}", filepath)])
+                .unwrap_or_default();
+            theirs_contents.insert(filepath.clone(), theirs);
+        }
+
+        // Capture unified diff showing conflict markers
+        let mut diff_output = self.run_git(&["diff"]).unwrap_or_default();
+
+        // Truncate to 8000 chars (char-boundary safe) — we keep more for AI analysis,
+        // further truncation happens at Telegram message level
+        if diff_output.chars().count() > 8000 {
+            diff_output = diff_output.chars().take(8000).collect();
+        }
+
+        Ok(ConflictInfo {
+            files,
+            diff_output,
+            ours_contents,
+            theirs_contents,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum RebaseResult {
+    Success,
+    Conflict(ConflictInfo),
 }
 
 #[derive(Debug, Clone)]
