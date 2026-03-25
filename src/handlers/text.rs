@@ -20,9 +20,6 @@ pub async fn handle_text_message(
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Track chat_id for conflict notifications
-    chat_tracker.set(msg.chat.id).await;
-
     let text = match msg.text() {
         Some(t) => t.to_string(),
         None => return Ok(()),
@@ -35,6 +32,9 @@ pub async fn handle_text_message(
             return Ok(());
         }
     }
+
+    // Track chat_id for conflict notifications (after auth check)
+    chat_tracker.set(msg.chat.id).await;
 
     info!(text_length = text.len(), "Processing text message");
 

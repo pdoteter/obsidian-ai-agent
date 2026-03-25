@@ -13,6 +13,13 @@ pub enum ConflictResolution {
     Abort,
 }
 
+/// Escape HTML special characters for Telegram HTML parse mode
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 /// Manages conflict resolution via Telegram inline keyboard
 #[allow(dead_code)]
 pub struct ConflictResolver {
@@ -60,7 +67,7 @@ impl ConflictResolver {
 
         // AI analysis section (if available)
         if let Some(ref analysis) = ai_analysis {
-            message_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", analysis));
+            message_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", escape_html(analysis)));
         }
 
         // Diff preview section (truncated to fit within Telegram's 4096 char limit)
@@ -76,7 +83,7 @@ impl ConflictResolver {
             diff_preview.to_string()
         };
 
-        message_parts.push(format!("\n<b>Diff preview:</b>\n<pre>{}</pre>\n", truncated_diff));
+        message_parts.push(format!("\n<b>Diff preview:</b>\n<pre>{}</pre>\n", escape_html(&truncated_diff)));
 
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(
@@ -98,7 +105,7 @@ impl ConflictResolver {
         // Check if message fits within Telegram's 4096 char limit
         if full_message.len() > 4096 {
             // Send diff preview as separate message first, then send resolution message without diff
-            let diff_msg = format!("<b>Diff preview:</b>\n<pre>{}</pre>", truncated_diff);
+            let diff_msg = format!("<b>Diff preview:</b>\n<pre>{}</pre>", escape_html(&truncated_diff));
             self.bot
                 .send_message(chat_id, diff_msg)
                 .parse_mode(ParseMode::Html)
@@ -110,7 +117,7 @@ impl ConflictResolver {
                 format!("\n<b>Conflicting files:</b>\n{}\n", files_display),
             ];
             if let Some(analysis) = ai_analysis {
-                simple_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", analysis));
+                simple_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", escape_html(&analysis)));
             }
             simple_parts.push("\n(See diff above)".to_string());
             let simple_message = simple_parts.join("");

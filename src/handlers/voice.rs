@@ -24,9 +24,6 @@ pub async fn handle_voice_message(
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Track chat_id for conflict notifications
-    chat_tracker.set(msg.chat.id).await;
-
     // Extract voice from the message
     let voice = match msg.voice() {
         Some(v) => v.clone(),
@@ -40,6 +37,9 @@ pub async fn handle_voice_message(
             return Ok(());
         }
     }
+
+    // Track chat_id for conflict notifications (after auth check)
+    chat_tracker.set(msg.chat.id).await;
 
     info!(
         duration_secs = %voice.duration,

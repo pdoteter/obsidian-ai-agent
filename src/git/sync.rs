@@ -250,6 +250,9 @@ impl GitSync {
         // Force push our local version
         self.force_push()?;
 
+        // Verify clean state
+        self.verify_clean_state()?;
+
         info!("Resolved conflict using local version (ours)");
         Ok(())
     }
@@ -263,6 +266,9 @@ impl GitSync {
         let remote_ref = format!("{}/{}", self.remote_name, self.branch);
         self.run_git(&["reset", "--hard", &remote_ref])?;
 
+        // Verify clean state
+        self.verify_clean_state()?;
+
         info!("Resolved conflict using remote version (theirs)");
         Ok(())
     }
@@ -272,7 +278,27 @@ impl GitSync {
         // Defensive abort
         let _ = self.run_git(&["rebase", "--abort"]);
 
+        // Verify clean state
+        self.verify_clean_state()?;
+
         info!("Conflict resolution aborted by user");
+        Ok(())
+    }
+
+    /// Verify repository is in a clean state with no leftover rebase
+    fn verify_clean_state(&self) -> Result<(), GitError> {
+        // Check if rebase is still in progress
+        let git_dir = self.repo_path.join(".git");
+        let rebase_merge = git_dir.join("rebase-merge");
+        let rebase_apply = git_dir.join("rebase-apply");
+
+        if rebase_merge.exists() || rebase_apply.exists() {
+            return Err(GitError::CommandFailed {
+                command: "verify_clean_state".to_string(),
+                message: "Repository still has active rebase".to_string(),
+            });
+        }
+
         Ok(())
     }
 

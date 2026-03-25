@@ -22,9 +22,6 @@ pub async fn handle_photo_message(
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Track chat_id for conflict notifications
-    chat_tracker.set(msg.chat.id).await;
-
     // 1. Auth check
     if let Some(user) = msg.from.as_ref() {
         if !config.is_user_allowed(user.id.0) {
@@ -32,6 +29,9 @@ pub async fn handle_photo_message(
             return Ok(());
         }
     }
+
+    // Track chat_id for conflict notifications (after auth check)
+    chat_tracker.set(msg.chat.id).await;
 
     // 2. Extract photo (highest resolution)
     let photos = msg.photo().ok_or("No photo in message").map_err(|e| {
