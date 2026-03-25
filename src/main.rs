@@ -16,6 +16,7 @@ use tracing::{error, info, warn};
 use ai::client::OpenRouterClient;
 use ai::transcribe::WhisperClient;
 use config::Config;
+use git::chat_tracker;
 use git::conflict;
 use git::debounce;
 use git::sync::GitSync;
@@ -75,6 +76,16 @@ async fn main() {
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
     let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone(), config.date_display_format.clone()).await);
 
+    // Initialize Telegram bot
+    let bot = Bot::new(&config.teloxide_token);
+
+    // Initialize conflict resolver
+    let conflict_resolver = conflict::ConflictResolver::new(bot.clone());
+    let conflict_pending = conflict_resolver.pending_map();
+
+    // Initialize chat_id tracker
+    let chat_tracker = chat_tracker::ChatIdTracker::new();
+
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
         let git_path = config.git_path.clone().expect("GIT_PATH required when git sync enabled");
@@ -84,18 +95,18 @@ async fn main() {
             config.git_branch.clone(),
             config.git_ssh_key_path.clone(),
         ));
-        Some(debounce::spawn_debounced_sync(git_sync.clone(), config.git_sync_debounce_secs))
+        Some(debounce::spawn_debounced_sync(
+            git_sync.clone(),
+            config.git_sync_debounce_secs,
+            conflict_resolver,
+            ai_client.clone(),
+            config.clone(),
+            chat_tracker.clone(),
+        ))
     } else {
         info!("Git sync disabled (GIT_SYNC_ENABLED=false)");
         None
     };
-
-    // Initialize Telegram bot
-    let bot = Bot::new(&config.teloxide_token);
-
-    // Initialize conflict resolver
-    let conflict_resolver = conflict::ConflictResolver::new(bot.clone());
-    let conflict_pending = conflict_resolver.pending_map();
 
     info!(
         vault_path = %config.vault_path.display(),
@@ -118,7 +129,8 @@ async fn main() {
             whisper_client.clone(),
             vault.clone(),
             sync_notifier.clone(),
-            conflict_pending.clone()
+            conflict_pending.clone(),
+            chat_tracker.clone()
         ])
         .default_handler(|upd| async move {
             warn!(update_id = upd.id.0, "Unhandled update");
@@ -148,16 +160,17 @@ async fn handle_message(
     whisper_client: Arc<WhisperClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
+    chat_tracker: chat_tracker::ChatIdTracker,
 ) -> HandlerResult {
     // Route based on message content type
     if msg.photo().is_some() {
-        handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier)
+        handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker)
             .await
     } else if msg.voice().is_some() {
-        handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier)
+        handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier, chat_tracker)
             .await
     } else if msg.text().is_some() {
-        handlers::text::handle_text_message(bot, msg, config, ai_client, vault, sync_notifier).await
+        handlers::text::handle_text_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker).await
     } else {
         bot.send_message(
             msg.chat.id,

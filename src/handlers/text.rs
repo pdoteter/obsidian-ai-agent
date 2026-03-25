@@ -5,6 +5,7 @@ use tracing::{error, info};
 
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
+use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
@@ -17,7 +18,11 @@ pub async fn handle_text_message(
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
+    chat_tracker: ChatIdTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Track chat_id for conflict notifications
+    chat_tracker.set(msg.chat.id).await;
+
     let text = match msg.text() {
         Some(t) => t.to_string(),
         None => return Ok(()),

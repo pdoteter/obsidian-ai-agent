@@ -16,7 +16,7 @@ pub enum ConflictResolution {
 /// Manages conflict resolution via Telegram inline keyboard
 #[allow(dead_code)]
 pub struct ConflictResolver {
-    bot: Bot,
+    pub bot: Bot,
     /// Pending conflict resolutions: callback_data_prefix → sender
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>>>,
 }

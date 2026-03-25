@@ -8,6 +8,7 @@ use crate::ai::client::OpenRouterClient;
 use crate::ai::transcribe::WhisperClient;
 use crate::audio::download;
 use crate::config::Config;
+use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
@@ -21,7 +22,11 @@ pub async fn handle_voice_message(
     whisper_client: Arc<WhisperClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
+    chat_tracker: ChatIdTracker,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Track chat_id for conflict notifications
+    chat_tracker.set(msg.chat.id).await;
+
     // Extract voice from the message
     let voice = match msg.voice() {
         Some(v) => v.clone(),
