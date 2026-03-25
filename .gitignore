@@ -7,3 +7,5 @@ config.docker.yaml
 *.oga
 *.wav
 Obsidian/
+
+target-f1-audit/
