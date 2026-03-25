@@ -34,6 +34,9 @@ struct FileConfig {
 
     #[serde(default)]
     image: ImageConfig,
+
+    #[serde(default)]
+    url: UrlConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +171,7 @@ pub struct Config {
     pub date_display_format: String,
     pub guide_path: Option<PathBuf>,
     pub image: ImageConfig,
+    pub url: UrlConfig,
 }
 
 impl Config {
@@ -251,6 +255,7 @@ impl Config {
             date_display_format: momentjs_to_chrono(&file.date_display_format),
             guide_path,
             image: file.image,
+            url: file.url,
         })
     }
 
@@ -278,9 +283,65 @@ pub enum ConfigError {
     InvalidPath(PathBuf),
 }
 
+/// URL handling configuration settings
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct UrlConfig {
+    pub transcript_folder: String,
+    pub fetch_timeout_secs: u64,
+    pub max_content_bytes: usize,
+    pub max_urls_per_message: usize,
+}
+
+impl Default for UrlConfig {
+    fn default() -> Self {
+        Self {
+            transcript_folder: "transcripts".to_string(),
+            fetch_timeout_secs: 15,
+            max_content_bytes: 524288,
+            max_urls_per_message: 5,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_url_config_defaults() {
+        // Verify UrlConfig::default() has correct default values
+        let url_config = UrlConfig::default();
+        assert_eq!(url_config.transcript_folder, "transcripts");
+        assert_eq!(url_config.fetch_timeout_secs, 15);
+        assert_eq!(url_config.max_content_bytes, 524288);
+        assert_eq!(url_config.max_urls_per_message, 5);
+    }
+
+    #[test]
+    fn test_custom_url_config() {
+        // Deserialize config with custom url section → verify fields
+        let file_config: FileConfig = serde_yml::from_str(
+            "vault_path: /tmp/vault\nurl:\n  transcript_folder: custom_transcripts\n  fetch_timeout_secs: 30\n  max_content_bytes: 1048576\n  max_urls_per_message: 10\n"
+        ).unwrap();
+
+        assert_eq!(file_config.url.transcript_folder, "custom_transcripts");
+        assert_eq!(file_config.url.fetch_timeout_secs, 30);
+        assert_eq!(file_config.url.max_content_bytes, 1048576);
+        assert_eq!(file_config.url.max_urls_per_message, 10);
+    }
+
+    #[test]
+    fn test_backward_compat_missing_url_section() {
+        // Deserialize config WITHOUT url section → verify defaults applied, no errors
+        let file_config: FileConfig = serde_yml::from_str("vault_path: /tmp/vault\n").unwrap();
+
+        // url section should have defaults
+        assert_eq!(file_config.url.transcript_folder, "transcripts");
+        assert_eq!(file_config.url.fetch_timeout_secs, 15);
+        assert_eq!(file_config.url.max_content_bytes, 524288);
+        assert_eq!(file_config.url.max_urls_per_message, 5);
+    }
 
     #[test]
     fn test_default_guide_path() {
