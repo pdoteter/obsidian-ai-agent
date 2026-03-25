@@ -152,6 +152,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(callback_handler)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_message(
     bot: Bot,
     msg: Message,

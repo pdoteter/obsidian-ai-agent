@@ -14,6 +14,7 @@ use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
 
 /// Handle incoming voice messages: download → transcribe (Whisper) → classify → write to vault
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_voice_message(
     bot: Bot,
     msg: Message,
