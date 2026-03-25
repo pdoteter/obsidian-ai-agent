@@ -5,6 +5,7 @@ mod error;
 mod git;
 mod handlers;
 mod image;
+mod url;
 mod vault;
 
 use std::sync::Arc;
