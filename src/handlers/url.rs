@@ -194,6 +194,17 @@ pub async fn handle_url_message(
         // Normal fast-mode flow for non-transcript URLs
         let fetched_page = fetch_for_url_type(detected_url, &config).await;
 
+        // Extract raw oEmbed title before AI processing for YouTube heading
+        let raw_youtube_title = if let Ok(page_content) = &fetched_page {
+            if matches!(detected_url.url_type, UrlType::YouTube { .. }) {
+                page_content.title.clone()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let (title_for_todo, summary_for_todo, tags_for_todo) = match fetched_page {
             Ok(page_content) => {
                 let fetched_title = page_content.title.clone();
@@ -258,13 +269,16 @@ pub async fn handle_url_message(
             }
         };
 
+        // Wire video_name for YouTube URLs using raw oEmbed title
+        let video_name = raw_youtube_title.as_deref();
+
         let (section, content) = writer::format_url_todo(
             &detected_url.url,
             title_for_todo.as_deref(),
             summary_for_todo.as_deref(),
             &tags_for_todo,
             None, // transcript integration is a later task
-            None, // video_name is not available in this context
+            video_name,
         );
 
         match vault.append_to_section(section, &content).await {
