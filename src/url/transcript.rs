@@ -1,23 +1,35 @@
 use crate::error::UrlError;
 use regex::Regex;
 use std::io::ErrorKind;
+use tempfile::TempDir;
 use tokio::process::Command;
 use tracing::{info, warn};
 
 /// Fetch YouTube transcript for a video using yt-dlp CLI.
-/// 
+///
 /// This function shells out to yt-dlp to download English auto-generated captions
-/// in VTT format, parses the output, and returns clean plain text.
-/// 
+/// in VTT format to a temp directory, reads the file, and returns clean plain text.
+///
+/// Note: yt-dlp's `--write-auto-sub` always writes subtitle files to disk — it does
+/// not output VTT to stdout. We use a temp directory to capture the output.
+///
 /// # Arguments
 /// * `video_id` - YouTube video ID (11-character alphanumeric, e.g. "dQw4w9WgXcQ")
-/// 
+///
 /// # Errors
 /// * `UrlError::TranscriptFailed` - yt-dlp not found, no captions available, or command failed
 pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
     let url = format!("https://youtube.com/watch?v={}", video_id);
 
     info!(video_id, "Fetching transcript via yt-dlp");
+
+    // yt-dlp writes subtitle files to disk, so we need a temp directory
+    let tmp_dir = TempDir::new().map_err(|e| UrlError::TranscriptFailed {
+        video_id: video_id.to_string(),
+        reason: format!("Failed to create temp directory: {}", e),
+    })?;
+
+    let output_template = format!("{}/%(id)s", tmp_dir.path().display());
 
     let output = Command::new("yt-dlp")
         .args(&[
@@ -27,8 +39,9 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
             "--skip-download",
             "--sub-format",
             "vtt",
+            "--no-warnings",
             "-o",
-            "-",
+            &output_template,
             &url,
         ])
         .output()
@@ -50,7 +63,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
     // Check command success
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        
+
         // Check for specific error messages
         if stderr.contains("no suitable subs") || stderr.contains("no subtitles") {
             return Err(UrlError::TranscriptFailed {
@@ -66,16 +79,10 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
         });
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    
-    if stdout.is_empty() {
-        return Err(UrlError::TranscriptFailed {
-            video_id: video_id.to_string(),
-            reason: "No transcript data returned".to_string(),
-        });
-    }
+    // yt-dlp writes the VTT file as {video_id}.en.vtt (or similar variants)
+    let vtt_content = find_and_read_vtt(tmp_dir.path(), video_id).await?;
 
-    let transcript = parse_vtt(&stdout);
+    let transcript = parse_vtt(&vtt_content);
 
     if transcript.is_empty() {
         return Err(UrlError::TranscriptFailed {
@@ -91,6 +98,56 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
     );
 
     Ok(transcript)
+}
+
+/// Find and read the VTT subtitle file that yt-dlp wrote to the temp directory.
+///
+/// yt-dlp may name it `{video_id}.en.vtt`, `{video_id}.en-orig.vtt`, or similar.
+/// We try the expected name first, then glob for any `.vtt` file.
+async fn find_and_read_vtt(
+    dir: &std::path::Path,
+    video_id: &str,
+) -> Result<String, UrlError> {
+    // Try the expected filename first
+    let expected = dir.join(format!("{}.en.vtt", video_id));
+    if expected.exists() {
+        return tokio::fs::read_to_string(&expected).await.map_err(|e| {
+            UrlError::TranscriptFailed {
+                video_id: video_id.to_string(),
+                reason: format!("Failed to read VTT file: {}", e),
+            }
+        });
+    }
+
+    // Fallback: find any .vtt file in the temp directory
+    let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| {
+        UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: format!("Failed to read temp directory: {}", e),
+        }
+    })?;
+
+    while let Some(entry) = entries.next_entry().await.map_err(|e| {
+        UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: format!("Failed to read directory entry: {}", e),
+        }
+    })? {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "vtt") {
+            return tokio::fs::read_to_string(&path).await.map_err(|e| {
+                UrlError::TranscriptFailed {
+                    video_id: video_id.to_string(),
+                    reason: format!("Failed to read VTT file: {}", e),
+                }
+            });
+        }
+    }
+
+    Err(UrlError::TranscriptFailed {
+        video_id: video_id.to_string(),
+        reason: "No transcript data returned — yt-dlp did not produce a VTT file".to_string(),
+    })
 }
 
 /// Parse VTT (WebVTT) subtitle format into plain text.
