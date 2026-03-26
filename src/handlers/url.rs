@@ -13,7 +13,7 @@ use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::url::detect::{DetectedUrl, UrlType};
 use crate::url::extract::fetch_page_content;
-use crate::url::youtube::fetch_youtube_metadata;
+use crate::url::youtube::{fetch_youtube_metadata, fetch_youtube_description};
 use crate::url::PageContent;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
@@ -560,8 +560,14 @@ async fn fetch_for_url_type(
 ) -> Result<PageContent, Box<dyn std::error::Error + Send + Sync>> {
     match &detected_url.url_type {
         UrlType::YouTube { video_id } => {
-            let metadata = fetch_youtube_metadata(&detected_url.url, config.url.fetch_timeout_secs)
-                .await
+            // Parallel fetch: metadata + description
+            let (metadata_result, description_result) = tokio::join!(
+                fetch_youtube_metadata(&detected_url.url, config.url.fetch_timeout_secs),
+                fetch_youtube_description(video_id, config.url.fetch_timeout_secs)
+            );
+
+            // Metadata must succeed (same error handling as before)
+            let metadata = metadata_result
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
             info!(
@@ -572,10 +578,27 @@ async fn fetch_for_url_type(
                 "Fetched YouTube metadata"
             );
 
-            let body_text = format!("{}\n\nBy: {}", metadata.title, metadata.author);
+            // Description is best-effort — use if available, fallback if not
+            let (body_text, description) = match description_result {
+                Ok(desc) => {
+                    info!(video_id = %video_id, description_length = desc.len(), "Fetched YouTube description");
+                    (
+                        format!("{}\n\nBy: {}\n\nDescription:\n{}", metadata.title, metadata.author, desc),
+                        Some(desc),
+                    )
+                }
+                Err(e) => {
+                    warn!(video_id = %video_id, error = %e, "Failed to fetch YouTube description, falling back");
+                    (
+                        format!("{}\n\nBy: {}", metadata.title, metadata.author),
+                        Some(format!("YouTube video by {}", metadata.author)),
+                    )
+                }
+            };
+
             Ok(PageContent {
                 title: Some(metadata.title),
-                description: Some(format!("YouTube video by {}", metadata.author)),
+                description,
                 body_text,
                 url: detected_url.url.clone(),
             })
