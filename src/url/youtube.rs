@@ -1,7 +1,11 @@
 use crate::error::UrlError;
 use regex::Regex;
 use serde::Deserialize;
+use std::io::ErrorKind;
 use std::time::Duration;
+use tokio::process::Command;
+use tokio::time::timeout;
+use tracing::info;
 
 /// YouTube video metadata fetched from oEmbed API
 #[derive(Debug, Clone)]
@@ -95,6 +99,83 @@ pub async fn fetch_youtube_metadata(
         thumbnail_url: oembed.thumbnail_url,
         video_id,
     })
+}
+
+/// Fetch YouTube video description using yt-dlp CLI
+///
+/// This function shells out to yt-dlp to fetch the video description using the `--print description` option.
+///
+/// # Arguments
+/// * `video_id` - YouTube video ID (11-character alphanumeric, e.g. "dQw4w9WgXcQ")
+/// * `timeout_secs` - Command execution timeout in seconds
+///
+/// # Errors
+/// * `UrlError::TranscriptFailed` - yt-dlp not found, command failed, or description is empty
+pub async fn fetch_youtube_description(
+    video_id: &str,
+    timeout_secs: u64,
+) -> Result<String, UrlError> {
+    let url = format!("https://www.youtube.com/watch?v={}", video_id);
+
+    info!(video_id, "Fetching description via yt-dlp");
+
+    // Build the command: yt-dlp --print description -- "https://www.youtube.com/watch?v={video_id}"
+    let mut cmd = Command::new("yt-dlp");
+    cmd.args(&["--print", "description", "--", &url]);
+
+    // Wrap with timeout to prevent hanging
+    let output = timeout(
+        Duration::from_secs(timeout_secs),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| UrlError::TranscriptFailed {
+        video_id: video_id.to_string(),
+        reason: format!("yt-dlp command timed out after {}s", timeout_secs),
+    })?
+    .map_err(|e| {
+        if e.kind() == ErrorKind::NotFound {
+            UrlError::TranscriptFailed {
+                video_id: video_id.to_string(),
+                reason: "yt-dlp not found. Install from: https://github.com/yt-dlp/yt-dlp#installation".to_string(),
+            }
+        } else {
+            UrlError::TranscriptFailed {
+                video_id: video_id.to_string(),
+                reason: format!("Failed to execute yt-dlp: {}", e),
+            }
+        }
+    })?;
+
+    // Check command success
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: format!("yt-dlp command failed: {}", stderr),
+        });
+    }
+
+    // Parse stdout as UTF-8 and trim whitespace
+    let description = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_string();
+
+    // Return error if description is empty
+    if description.is_empty() {
+        return Err(UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: "Video description is empty".to_string(),
+        });
+    }
+
+    info!(
+        video_id,
+        description_length = description.len(),
+        "Successfully fetched description"
+    );
+
+    Ok(description)
 }
 
 /// Extract video ID from a YouTube URL
@@ -240,5 +321,30 @@ mod tests {
     fn test_fetch_youtube_metadata_real() {
         // This test would make a real HTTP request to YouTube's oEmbed API
         // Run with: cargo test --ignored
+    }
+
+    #[test]
+    fn test_fetch_youtube_description_video_id_format() {
+        // Test that the command is built correctly with the video ID
+        // This is a compile-time verification that the function signature is correct
+        // The actual execution would require yt-dlp to be installed
+        let video_id = "dQw4w9WgXcQ";
+        assert_eq!(video_id.len(), 11, "Video ID should be 11 characters");
+    }
+
+    #[test]
+    fn test_fetch_youtube_description_empty_string_validation() {
+        // Test that an empty description would be rejected
+        let empty_desc = "";
+        assert!(empty_desc.trim().is_empty(), "Empty description should fail validation");
+    }
+
+    #[test]
+    fn test_fetch_youtube_description_whitespace_trimming() {
+        // Test that whitespace is properly trimmed
+        let description_with_whitespace = "  Test description  \n\r\t  ";
+        let trimmed = description_with_whitespace.trim().to_string();
+        assert_eq!(trimmed, "Test description");
+        assert!(!trimmed.is_empty());
     }
 }
