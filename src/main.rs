@@ -217,7 +217,21 @@ async fn handle_callback(
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
+    chat_tracker: chat_tracker::ChatIdTracker,
 ) -> HandlerResult {
+    // Enforce same authorization policy as message handlers before processing callbacks.
+    if !config.allowed_user_ids.is_empty() {
+        if !config.is_user_allowed(q.from.id.0) {
+            info!(user_id = q.from.id.0, "Unauthorized user, ignoring callback");
+            return Ok(());
+        }
+    }
+
+    // Track latest active chat on callbacks when available.
+    if let Some(ref msg) = q.message {
+        chat_tracker.set(msg.chat().id).await;
+    }
+
     if let Some(ref data) = q.data {
         if data.starts_with("yt_transcript:") {
             return handlers::url::handle_transcript_callback(

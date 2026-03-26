@@ -64,20 +64,17 @@ pub fn spawn_debounced_sync(
 
             if pending {
                 // Debounce: wait for quiet period
-                let deadline = Instant::now() + debounce_duration;
+                let sleep = tokio::time::sleep(debounce_duration);
+                tokio::pin!(sleep);
                 loop {
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-
                     tokio::select! {
                         result = rx.recv() => {
                             match result {
                                 Some(()) => {
                                     // Reset the timer — more changes incoming
                                     info!("Additional change detected, resetting debounce timer");
-                                    continue; // Will recalculate from new deadline below
+                                    sleep.as_mut().reset(Instant::now() + debounce_duration);
+                                    continue;
                                 }
                                 None => {
                                     info!("Channel closed during debounce");
@@ -86,7 +83,7 @@ pub fn spawn_debounced_sync(
                                 }
                             }
                         }
-                        _ = tokio::time::sleep(remaining) => {
+                        _ = &mut sleep => {
                             break;
                         }
                     }
@@ -135,7 +132,7 @@ pub fn spawn_debounced_sync(
                                     let info_clone = info.clone();
                                     
                                     match tokio::time::timeout(
-                                        Duration::from_secs(60),
+                                        Duration::from_secs(25),
                                         analyze_conflicts(&ai_client, &config.openrouter_model_classify, &info_clone)
                                     ).await {
                                         Ok(Ok(analysis)) => Some(analysis),
@@ -144,7 +141,7 @@ pub fn spawn_debounced_sync(
                                             None
                                         }
                                         Err(_) => {
-                                            warn!("AI conflict analysis timed out after 60s");
+                                            warn!("AI conflict analysis timed out after 25s");
                                             None
                                         }
                                     }

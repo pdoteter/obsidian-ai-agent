@@ -262,6 +262,18 @@ impl GitSync {
         // Defensive abort
         let _ = self.run_git(&["rebase", "--abort"]);
 
+        // Refuse destructive reset when there are local changes.
+        // During a long conflict-resolution wait window, handlers may keep writing notes;
+        // those uncommitted changes must not be silently discarded.
+        if self.has_changes()? {
+            return Err(GitError::CommandFailed {
+                command: "resolve_theirs".to_string(),
+                message:
+                    "Local uncommitted changes detected; refusing reset --hard to avoid data loss"
+                        .to_string(),
+            });
+        }
+
         // Reset to remote state
         let remote_ref = format!("{}/{}", self.remote_name, self.branch);
         self.run_git(&["reset", "--hard", &remote_ref])?;
