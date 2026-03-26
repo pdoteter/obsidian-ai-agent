@@ -3,4 +3,4 @@ pub mod frontmatter;
 pub mod transcript;
 pub mod writer;
 
-pub use transcript::{save_transcript, TranscriptFile};
+pub use transcript::save_transcript;
