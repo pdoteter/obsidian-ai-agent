@@ -121,7 +121,7 @@ pub async fn fetch_youtube_description(
 
     // Build the command: yt-dlp --print description -- "https://www.youtube.com/watch?v={video_id}"
     let mut cmd = Command::new("yt-dlp");
-    cmd.args(&["--print", "description", "--", &url]);
+    cmd.args(["--print", "description", "--", &url]);
 
     // Wrap with timeout to prevent hanging
     let output = timeout(

@@ -12,6 +12,7 @@ use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
 
 /// Handle incoming text messages: classify → format → write to vault
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_text_message(
     bot: Bot,
     msg: Message,

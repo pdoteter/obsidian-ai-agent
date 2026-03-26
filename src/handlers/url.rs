@@ -82,7 +82,7 @@ pub async fn handle_url_message(
         // Check if this is a YouTube URL with transcript keyword
         let is_transcript_direct_flow = if let UrlType::YouTube { video_id: _ } = &detected_url.url_type {
             let is_transcript_req = crate::url::is_transcript_request(
-                surrounding_text.as_deref().unwrap_or(&msg.text().unwrap_or("")),
+                surrounding_text.as_deref().unwrap_or(msg.text().unwrap_or("")),
             );
             is_transcript_req
         } else {

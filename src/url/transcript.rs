@@ -32,7 +32,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
     let output_template = format!("{}/%(id)s", tmp_dir.path().display());
 
     let output = Command::new("yt-dlp")
-        .args(&[
+        .args([
             "--write-auto-sub",
             "--sub-lang",
             "en",

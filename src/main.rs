@@ -201,6 +201,7 @@ async fn handle_message(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_callback(
     bot: Bot,
     q: CallbackQuery,
@@ -220,11 +221,9 @@ async fn handle_callback(
     chat_tracker: chat_tracker::ChatIdTracker,
 ) -> HandlerResult {
     // Enforce same authorization policy as message handlers before processing callbacks.
-    if !config.allowed_user_ids.is_empty() {
-        if !config.is_user_allowed(q.from.id.0) {
-            info!(user_id = q.from.id.0, "Unauthorized user, ignoring callback");
-            return Ok(());
-        }
+    if !config.allowed_user_ids.is_empty() && !config.is_user_allowed(q.from.id.0) {
+        info!(user_id = q.from.id.0, "Unauthorized user, ignoring callback");
+        return Ok(());
     }
 
     // Track latest active chat on callbacks when available.
@@ -243,8 +242,7 @@ async fn handle_callback(
                 config,
                 sync_notifier,
             )
-            .await
-            .map_err(Into::into);
+            .await;
         } else if data.starts_with("conflict:") {
             return conflict::handle_conflict_callback(bot, q, conflict_pending).await;
         }
