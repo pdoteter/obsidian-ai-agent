@@ -264,6 +264,7 @@ pub async fn handle_url_message(
             summary_for_todo.as_deref(),
             &tags_for_todo,
             None, // transcript integration is a later task
+            None, // video_name is not available in this context
         );
 
         match vault.append_to_section(section, &content).await {

@@ -48,11 +48,13 @@ pub fn format_raw_entry(text: &str) -> (&'static str, String) {
 /// * `summary` - Optional page summary to display in a blockquote
 /// * `tags` - Slice of tags to append as hashtags
 /// * `transcript_link` - Optional transcript wiki-link to append after the title
+/// * `video_name` - Optional video name to display as a level-3 heading before the TODO
 ///
 /// # Returns
 /// Tuple of ("## ✅ Todos", formatted_markdown_string)
 ///
 /// # Format Examples
+/// With video name: `### My Video\n- [ ] [Title](url) — [[transcript/path]]\n  > summary\n  #tag1 #tag2`
 /// Full: `- [ ] [Title](url) — [[transcript/path]]\n  > summary\n  #tag1 #tag2`
 /// Without summary: `- [ ] [Title](url)\n  > ⚠️ Could not fetch page content`
 /// Without title: `- [ ] url\n  > summary`
@@ -62,6 +64,7 @@ pub fn format_url_todo(
     summary: Option<&str>,
     tags: &[String],
     transcript_link: Option<&str>,
+    video_name: Option<&str>,
 ) -> (&'static str, String) {
     // Build the title line
     let title_line = if let Some(title) = title {
@@ -97,10 +100,23 @@ pub fn format_url_todo(
     };
 
     // Combine all parts
-    let content = if tags.is_empty() {
-        format!("{}\n{}", title_line, summary_line)
+    let content = if let Some(name) = video_name {
+        // Prepend video name as level-3 heading
+        if tags.is_empty() {
+            format!("### {}\n{}\n{}", name, title_line, summary_line)
+        } else {
+            format!(
+                "### {}\n{}\n{}\n{}",
+                name, title_line, summary_line, tags_line
+            )
+        }
     } else {
-        format!("{}\n{}\n{}", title_line, summary_line, tags_line)
+        // Existing logic when video_name is None
+        if tags.is_empty() {
+            format!("{}\n{}", title_line, summary_line)
+        } else {
+            format!("{}\n{}\n{}", title_line, summary_line, tags_line)
+        }
     };
 
     ("## ✅ Todos", content)
@@ -184,6 +200,7 @@ mod tests {
             Some("This is a summary"),
             &["web".to_string(), "example".to_string()],
             Some("transcripts/2026-03-25-video-title"),
+            None,
         );
         assert_eq!(section, "## ✅ Todos");
         assert!(content.contains(
@@ -202,6 +219,7 @@ mod tests {
             Some("Summary"),
             &["web".to_string()],
             None,
+            None,
         );
         assert_eq!(section, "## ✅ Todos");
         assert!(content.contains("- [ ] [Example](https://example.com)"));
@@ -217,6 +235,7 @@ mod tests {
             Some("Example"),
             Some("Summary"),
             &[],
+            None,
             None,
         );
         assert_eq!(section, "## ✅ Todos");
@@ -235,6 +254,7 @@ mod tests {
             None,
             &["web".to_string()],
             None,
+            None,
         );
         assert_eq!(section, "## ✅ Todos");
         assert!(content.contains("- [ ] [Example](https://example.com)"));
@@ -250,6 +270,7 @@ mod tests {
             Some("Summary"),
             &["web".to_string()],
             None,
+            None,
         );
         assert_eq!(section, "## ✅ Todos");
         assert!(content.contains("- [ ] https://example.com"));
@@ -259,7 +280,8 @@ mod tests {
 
     #[test]
     fn test_format_url_todo_url_only() {
-        let (section, content) = format_url_todo("https://example.com", None, None, &[], None);
+        let (section, content) =
+            format_url_todo("https://example.com", None, None, &[], None, None);
         assert_eq!(section, "## ✅ Todos");
         assert!(content.contains("- [ ] https://example.com"));
         assert!(content.contains("> ⚠️ Could not fetch page content"));
@@ -275,10 +297,84 @@ mod tests {
             Some("Summary"),
             &[],
             None,
+            None,
         );
         assert_eq!(section, "## ✅ Todos");
         // Should contain markdown link even with special chars
         assert!(content.contains("- [ ] [Example [with] brackets](https://example.com)"));
         assert!(content.contains("> Summary"));
+    }
+
+    #[test]
+    fn test_format_url_todo_with_video_name() {
+        let (section, content) = format_url_todo(
+            "https://youtube.com/watch?v=abc123",
+            Some("Cool Tutorial"),
+            Some("Learn Rust"),
+            &[],
+            None,
+            Some("My Awesome Video"),
+        );
+        assert_eq!(section, "## ✅ Todos");
+        assert!(content.starts_with("### My Awesome Video\n"));
+        assert!(content.contains("- [ ] [Cool Tutorial]"));
+        assert!(content.contains("> Learn Rust"));
+        assert_eq!(content.lines().count(), 3); // heading + title + summary
+    }
+
+    #[test]
+    fn test_format_url_todo_with_video_name_and_all_fields() {
+        let (section, content) = format_url_todo(
+            "https://youtube.com/watch?v=xyz789",
+            Some("Advanced Rust Patterns"),
+            Some("Deep dive into Rust performance optimization"),
+            &["rust".to_string(), "performance".to_string()],
+            Some("transcripts/2026-03-25-rust-patterns"),
+            Some("Rust Conference Talk"),
+        );
+        assert_eq!(section, "## ✅ Todos");
+        assert!(content.starts_with("### Rust Conference Talk\n"));
+        assert!(content.contains("- [ ] [Advanced Rust Patterns](https://youtube.com/watch?v=xyz789) — [[transcripts/2026-03-25-rust-patterns]]"));
+        assert!(content.contains("> Deep dive into Rust performance optimization"));
+        assert!(content.contains("#rust"));
+        assert!(content.contains("#performance"));
+        assert_eq!(content.lines().count(), 4); // heading + title + summary + tags
+    }
+
+    #[test]
+    fn test_format_url_todo_with_video_name_special_chars() {
+        let (section, content) = format_url_todo(
+            "https://example.com",
+            Some("Tutorial [Beginner]"),
+            Some("Learn basics"),
+            &[],
+            None,
+            Some("Video #1: Introduction"),
+        );
+        assert_eq!(section, "## ✅ Todos");
+        assert!(content.starts_with("### Video #1: Introduction\n"));
+        assert!(content.contains("- [ ] [Tutorial [Beginner]]"));
+        assert!(content.contains("> Learn basics"));
+    }
+
+    #[test]
+    fn test_format_url_todo_without_video_name_unchanged() {
+        let (section, content) = format_url_todo(
+            "https://example.com",
+            Some("Example"),
+            Some("Summary"),
+            &["web".to_string()],
+            None,
+            None,
+        );
+        assert_eq!(section, "## ✅ Todos");
+        // Verify exact format without heading
+        assert!(!content.starts_with("###"));
+        assert!(content.starts_with("- [ ]"));
+        assert!(content.contains("- [ ] [Example](https://example.com)"));
+        assert!(content.contains("> Summary"));
+        assert!(content.contains("#web"));
+        // Verify line count (title + summary + tags = 3 lines)
+        assert_eq!(content.lines().count(), 3);
     }
 }
