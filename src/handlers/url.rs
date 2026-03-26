@@ -434,8 +434,15 @@ pub async fn handle_transcript_callback(
             }
         };
 
-        let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
-        if let Err(e) = vault.append_to_section("## ✅ Todos", &wiki_link_entry).await {
+        let (section, content) = crate::vault::writer::format_url_todo(
+            &request.url,
+            Some(&summary.title),
+            Some(&summary.summary),
+            &summary.tags,
+            Some(&transcript_file.wiki_link),
+            Some(&request.title),
+        );
+        if let Err(e) = vault.append_to_section(section, &content).await {
             warn!(error = %e, "Failed to add wiki-link to daily note");
         }
 
