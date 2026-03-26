@@ -36,7 +36,7 @@ impl WhisperClient {
         })
     }
 
-    /// Transcribe raw audio bytes (Ogg Opus / .oga) using OpenAI Whisper API.
+    /// Transcribe raw audio bytes (Ogg Opus) using OpenAI Whisper API.
     pub async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String, AiError> {
         info!(
             audio_size_bytes = audio_bytes.len(),
@@ -46,7 +46,7 @@ impl WhisperClient {
         );
 
         let file_part = reqwest::multipart::Part::bytes(audio_bytes.to_vec())
-            .file_name("audio.oga")
+            .file_name("audio.ogg")
             .mime_str("audio/ogg")
             .map_err(|e| AiError::TranscriptionFailed(format!("Failed to build multipart: {}", e)))?;
 
