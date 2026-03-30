@@ -414,6 +414,18 @@ pub async fn handle_transcript_callback(
             }
         };
 
+        // Format transcript with AI before saving
+        let formatted_transcript = match ai_client
+            .format_transcript(&transcript_text, &request.title, &config.openrouter_model_classify)
+            .await
+        {
+            Ok(formatted) => formatted,
+            Err(e) => {
+                warn!(error = %e, "Failed to format transcript, using raw text");
+                transcript_text.clone()
+            }
+        };
+
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
         let transcript_file = match crate::vault::save_transcript(
             std::path::Path::new(&config.vault_path),
@@ -421,7 +433,7 @@ pub async fn handle_transcript_callback(
             &request.video_id,
             &request.title,
             &summary.summary,
-            &transcript_text,
+            &formatted_transcript,
             &date,
         )
         .await
@@ -442,8 +454,8 @@ pub async fn handle_transcript_callback(
             Some(&transcript_file.wiki_link),
             Some(&request.title),
         );
-        if let Err(e) = vault.append_to_section(section, &content).await {
-            warn!(error = %e, "Failed to add wiki-link to daily note");
+        if let Err(e) = vault.replace_entry_by_url(section, &request.url, &content).await {
+            warn!(error = %e, section, url = %request.url, "Failed to replace entry in daily note");
         }
 
         if let Some(ref notifier) = sync_notifier {
