@@ -2,7 +2,7 @@ use chrono::Local;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::error::VaultError;
 
@@ -365,6 +365,33 @@ impl DailyNoteManager {
         Ok(path)
     }
 
+    /// Replace an existing entry in a specific section by matching URL.
+    pub async fn replace_entry_by_url(
+        &self,
+        section_heading: &str,
+        url: &str,
+        new_content: &str,
+    ) -> Result<PathBuf, VaultError> {
+        let path = self.ensure_today().await?;
+
+        let file_content = fs::read_to_string(&path).await?;
+
+        let updated_file_content =
+            replace_in_section_by_url(&file_content, section_heading, url, new_content);
+
+        fs::write(&path, &updated_file_content).await?;
+
+        debug!(
+            path = %path.display(),
+            section = section_heading,
+            url,
+            content_length = new_content.len(),
+            "Replaced daily note entry by URL"
+        );
+
+        Ok(path)
+    }
+
     /// Update frontmatter fields in today's daily note
     pub async fn update_frontmatter(
         &self,
@@ -452,6 +479,93 @@ fn insert_after_heading(document: &str, heading: &str, content: &str) -> String 
     result.join("\n")
 }
 
+/// Replace an entry inside a section by matching URL in markdown link format.
+/// Returns the original document unchanged when no matching URL is found in the section.
+fn replace_in_section_by_url(
+    document: &str,
+    section_heading: &str,
+    url: &str,
+    new_content: &str,
+) -> String {
+    let lines: Vec<&str> = document.lines().collect();
+    let mut section_start = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim() == section_heading.trim() {
+            section_start = Some(i + 1);
+            break;
+        }
+    }
+
+    let Some(section_start) = section_start else {
+        return document.to_string();
+    };
+
+    let mut section_end = lines.len();
+    for (i, line) in lines.iter().enumerate().skip(section_start) {
+        if line.trim().starts_with("## ") {
+            section_end = i;
+            break;
+        }
+    }
+
+    let url_pattern = format!("]({})", url);
+    let mut url_line_idx = None;
+    for (i, line) in lines
+        .iter()
+        .enumerate()
+        .skip(section_start)
+        .take(section_end.saturating_sub(section_start))
+    {
+        if line.contains(&url_pattern) {
+            url_line_idx = Some(i);
+            break;
+        }
+    }
+
+    let Some(url_line_idx) = url_line_idx else {
+        return document.to_string();
+    };
+
+    let mut entry_start = url_line_idx;
+    if entry_start > section_start {
+        let prev_trimmed = lines[entry_start - 1].trim_start();
+        if prev_trimmed.starts_with("### ") {
+            entry_start -= 1;
+        } else if !prev_trimmed.starts_with("- [ ]") {
+            let mut j = entry_start;
+            while j > section_start {
+                let candidate = lines[j - 1].trim_start();
+                if candidate.is_empty() {
+                    break;
+                }
+                if candidate.starts_with("- [ ]") || candidate.starts_with("### ") {
+                    entry_start = j - 1;
+                    break;
+                }
+                j -= 1;
+            }
+        }
+    }
+
+    let mut entry_end = url_line_idx + 1;
+    while entry_end < section_end {
+        let next_line = lines[entry_end];
+        if next_line.starts_with("  >") || next_line.starts_with("  #") {
+            entry_end += 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut result_lines: Vec<&str> = Vec::new();
+    result_lines.extend_from_slice(&lines[..entry_start]);
+    result_lines.extend(new_content.lines());
+    result_lines.extend_from_slice(&lines[entry_end..]);
+
+    result_lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -509,6 +623,135 @@ mod tests {
         assert_eq!(settings.format, "YYYY-MM-DD");
         assert_eq!(settings.template, "");
         assert!(!settings.autorun);
+    }
+
+    #[test]
+    fn test_replace_in_section_basic_replace() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [Old](https://youtube.com/watch?v=abc)\n  > old summary\n  #old\n\n## 📋 Log\n";
+        let replacement = "- [ ] [New](https://youtube.com/watch?v=abc) — [[transcripts/new]]\n  > new summary\n  #new";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=abc",
+            replacement,
+        );
+
+        assert!(result.contains(replacement));
+        assert!(!result.contains("old summary"));
+        assert!(result.contains("## 📋 Log"));
+    }
+
+    #[test]
+    fn test_replace_in_section_heading_variant_replaces_four_lines() {
+        let doc = "# Daily\n\n## ✅ Todos\n### Video Name\n- [ ] [Old](https://youtube.com/watch?v=abc)\n  > old summary\n  #tag1 #tag2\n\n## 📋 Log\n";
+        let replacement = "### Video Name\n- [ ] [New](https://youtube.com/watch?v=abc) — [[transcripts/new]]\n  > updated summary\n  #new";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=abc",
+            replacement,
+        );
+
+        assert!(result.contains(replacement));
+        assert!(!result.contains("#tag1 #tag2"));
+        assert!(!result.contains("old summary"));
+    }
+
+    #[test]
+    fn test_replace_in_section_no_tags_variant_replaces_two_lines() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [Old](https://youtube.com/watch?v=abc)\n  > old summary\n\n## 📋 Log\n";
+        let replacement = "- [ ] [New](https://youtube.com/watch?v=abc)\n  > new summary";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=abc",
+            replacement,
+        );
+
+        assert!(result.contains(replacement));
+        assert!(!result.contains("old summary"));
+    }
+
+    #[test]
+    fn test_replace_in_section_transcript_link_variant() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [Old](https://youtube.com/watch?v=abc) — [[transcripts/old]]\n  > old summary\n  #video\n\n## 📋 Log\n";
+        let replacement = "- [ ] [Old](https://youtube.com/watch?v=abc) — [[transcripts/new]]\n  > new transcript summary\n  #video";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=abc",
+            replacement,
+        );
+
+        assert!(result.contains("[[transcripts/new]]"));
+        assert!(!result.contains("[[transcripts/old]]"));
+        assert!(!result.contains("old summary"));
+    }
+
+    #[test]
+    fn test_replace_in_section_url_not_found_no_op() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [Old](https://youtube.com/watch?v=abc)\n  > old summary\n\n## 📋 Log\n";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=missing",
+            "- [ ] [New](https://youtube.com/watch?v=missing)\n  > replacement",
+        );
+
+        assert_eq!(result, doc);
+    }
+
+    #[test]
+    fn test_replace_url_not_found() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [Old](https://youtube.com/watch?v=abc)\n  > old summary\n\n## 📋 Log\n";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=missing",
+            "- [ ] [New](https://youtube.com/watch?v=missing)\n  > replacement",
+        );
+
+        assert_eq!(result, doc);
+    }
+
+    #[test]
+    fn test_replace_in_section_multiple_entries_only_matching_url_replaced() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [First](https://youtube.com/watch?v=aaa)\n  > first summary\n\n- [ ] [Second](https://youtube.com/watch?v=bbb)\n  > second summary\n  #tag\n\n## 📋 Log\n";
+        let replacement = "- [ ] [Second Updated](https://youtube.com/watch?v=bbb)\n  > second updated";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=bbb",
+            replacement,
+        );
+
+        assert!(result.contains("first summary"));
+        assert!(result.contains(replacement));
+        assert!(!result.contains("second summary"));
+    }
+
+    #[test]
+    fn test_replace_in_section_entry_at_end_of_section() {
+        let doc = "# Daily\n\n## ✅ Todos\n- [ ] [End](https://youtube.com/watch?v=end)\n  > end summary\n  #tag\n";
+        let replacement = "- [ ] [End Updated](https://youtube.com/watch?v=end)\n  > updated end summary\n  #done";
+
+        let result = replace_in_section_by_url(
+            doc,
+            "## ✅ Todos",
+            "https://youtube.com/watch?v=end",
+            replacement,
+        );
+
+        assert!(result.contains(replacement));
+        assert!(!result.contains("  > end summary"));
+        assert!(result.contains("## ✅ Todos"));
     }
 
     #[test]
