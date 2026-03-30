@@ -4,6 +4,7 @@
 config.yaml
 config.docker.yaml
 .sisyphus/
+.sisyphis/
 *.oga
 *.wav
 Obsidian/
