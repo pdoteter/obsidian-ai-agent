@@ -1,6 +1,7 @@
 use linkify::{LinkFinder, LinkKind};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 use url::Url;
 
 /// Type of URL detected
@@ -20,20 +21,23 @@ pub struct DetectedUrl {
     pub end: usize,
 }
 
-/// Detect URLs in text and classify them
-pub fn detect_urls(text: &str) -> Vec<DetectedUrl> {
-    let mut finder = LinkFinder::new();
-    finder.kinds(&[LinkKind::Url]);
-
-    // Regex to extract YouTube video IDs from various URL formats
-    let youtube_regex = Regex::new(
+/// Regex to extract YouTube video IDs from various URL formats.
+/// Compiled once at first access using LazyLock.
+static YOUTUBE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
         r"(?x)
         (?:(?:www\.|m\.)?youtube\.com/(?:watch\?v=|embed/|shorts/)|
            youtu\.be/)
         ([A-Za-z0-9_-]+)
         ",
     )
-    .expect("YouTube regex is valid");
+    .expect("YouTube regex is valid")
+});
+
+/// Detect URLs in text and classify them
+pub fn detect_urls(text: &str) -> Vec<DetectedUrl> {
+    let mut finder = LinkFinder::new();
+    finder.kinds(&[LinkKind::Url]);
 
     let mut detected_urls = Vec::new();
 
@@ -43,7 +47,7 @@ pub fn detect_urls(text: &str) -> Vec<DetectedUrl> {
         let end = link.end();
 
         // Try to parse as URL and classify it
-        let url_type = classify_url(link_str, &youtube_regex);
+        let url_type = classify_url(link_str);
 
         detected_urls.push(DetectedUrl {
             url: link_str.to_string(),
@@ -57,13 +61,13 @@ pub fn detect_urls(text: &str) -> Vec<DetectedUrl> {
 }
 
 /// Classify a URL by checking its domain and extracting metadata
-fn classify_url(url_str: &str, youtube_regex: &Regex) -> UrlType {
+fn classify_url(url_str: &str) -> UrlType {
     if let Ok(parsed_url) = Url::parse(url_str) {
         if let Some(host) = parsed_url.host_str() {
             // Check if host is a YouTube domain
             if is_youtube_domain(host) {
-                // Extract video ID using regex
-                if let Some(captures) = youtube_regex.captures(url_str) {
+                // Extract video ID using static regex
+                if let Some(captures) = YOUTUBE_REGEX.captures(url_str) {
                     if let Some(video_id_match) = captures.get(1) {
                         return UrlType::YouTube {
                             video_id: video_id_match.as_str().to_string(),
