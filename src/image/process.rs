@@ -57,36 +57,37 @@ pub fn encode_base64(bytes: &[u8]) -> String {
 }
 
 pub fn sanitize_slug(raw: &str) -> String {
-    // Convert to lowercase
-    let mut slug = raw.to_lowercase();
-    
-    // Replace non-alphanumeric with hyphens
-    slug = slug
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    
-    // Collapse multiple consecutive hyphens
-    while slug.contains("--") {
-        slug = slug.replace("--", "-");
+    // Convert to lowercase and replace non-alphanumeric with hyphens in a single pass,
+    // collapsing consecutive hyphens as we go (O(n) instead of O(n²))
+    let mut slug = String::with_capacity(raw.len());
+    let mut last_was_hyphen = true; // Start true to skip leading hyphens
+
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+            last_was_hyphen = false;
+        } else if !last_was_hyphen {
+            // Only add hyphen if previous char wasn't already a hyphen
+            slug.push('-');
+            last_was_hyphen = true;
+        }
+        // else: skip consecutive non-alphanumeric chars
     }
-    
-    // Trim leading/trailing hyphens
-    slug = slug.trim_matches('-').to_string();
-    
+
+    // Trim trailing hyphen
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+
     // Truncate to 50 chars
     if slug.len() > 50 {
         slug.truncate(50);
         // Re-trim trailing hyphen in case truncation created one
-        slug = slug.trim_end_matches('-').to_string();
+        if slug.ends_with('-') {
+            slug.pop();
+        }
     }
-    
+
     slug
 }
 
