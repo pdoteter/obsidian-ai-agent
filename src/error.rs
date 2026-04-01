@@ -84,23 +84,27 @@ pub enum VaultError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum GitError {
     #[error("Git command failed: `{command}` — {message}")]
     CommandFailed { command: String, message: String },
 
+    #[allow(dead_code)]
     #[error("Repository not found at: {0}")]
     RepoNotFound(PathBuf),
 
+    #[allow(dead_code)]
     #[error("Conflict detected in {file_count} file(s)")]
     ConflictDetected { file_count: usize },
 
+    #[allow(dead_code)]
     #[error("Rebase aborted by user")]
     RebaseAborted,
 
+    #[allow(dead_code)]
     #[error("Push failed: {0}")]
     PushFailed(String),
 
+    #[allow(dead_code)]
     #[error("SSH authentication failed: {0}")]
     SshAuthFailed(String),
 }
