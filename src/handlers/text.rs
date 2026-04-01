@@ -28,7 +28,15 @@ pub async fn handle_text_message(
         None => return Ok(()),
     };
 
-    // Check for URLs first and delegate to URL handler if present.
+    // Check user authorization first (before any processing)
+    if let Some(user) = msg.from.as_ref() {
+        if !config.is_user_allowed(user.id.0) {
+            info!(user_id = user.id.0, "Unauthorized user, ignoring message");
+            return Ok(());
+        }
+    }
+
+    // Check for URLs and delegate to URL handler if present
     let detected_urls = crate::url::detect::detect_urls(&text);
     if !detected_urls.is_empty() {
         let surrounding_text = if detected_urls.iter().all(|u| text.trim() == u.url) {
@@ -50,14 +58,6 @@ pub async fn handle_text_message(
             surrounding_text,
         )
         .await;
-    }
-
-    // Check user authorization
-    if let Some(user) = msg.from.as_ref() {
-        if !config.is_user_allowed(user.id.0) {
-            info!(user_id = user.id.0, "Unauthorized user, ignoring message");
-            return Ok(());
-        }
     }
 
     // Track chat_id for conflict notifications (after auth check)
