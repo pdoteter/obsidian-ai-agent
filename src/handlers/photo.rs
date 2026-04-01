@@ -7,7 +7,7 @@ use tracing::{error, info};
 
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
-use crate::error::ImageError;
+use crate::error::{AppError, AppResult, ImageError};
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
@@ -21,7 +21,7 @@ pub async fn handle_photo_message(
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<()> {
     // 1. Auth check
     if let Some(user) = msg.from.as_ref() {
         if !config.is_user_allowed(user.id.0) {
@@ -34,13 +34,13 @@ pub async fn handle_photo_message(
     chat_tracker.set(msg.chat.id);
 
     // 2. Extract photo (highest resolution)
-    let photos = msg.photo().ok_or("No photo in message").map_err(|e| {
-        error!(error = %e, "Photo message missing photo payload");
-        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    let photos = msg.photo().ok_or_else(|| {
+        error!("Photo message missing photo payload");
+        AppError::Image(ImageError::Download("No photo in message".to_string()))
     })?;
-    let photo = photos.last().ok_or("Empty photo array").map_err(|e| {
-        error!(error = %e, "Photo array was empty");
-        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    let photo = photos.last().ok_or_else(|| {
+        error!("Photo array was empty");
+        AppError::Image(ImageError::Download("Empty photo array".to_string()))
     })?;
 
     // 3. Extract caption
@@ -50,18 +50,12 @@ pub async fn handle_photo_message(
     let file = bot
         .get_file(&photo.file.id)
         .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to fetch Telegram file metadata for photo");
-            Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        .inspect_err(|e| error!(error = %e, "Failed to fetch Telegram file metadata for photo"))?;
 
     let mut bytes = Vec::new();
     bot.download_file(&file.path, &mut bytes)
         .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to download photo bytes from Telegram");
-            Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+        .inspect_err(|e| error!(error = %e, "Failed to download photo bytes from Telegram"))?;
 
     info!(
         size_bytes = bytes.len(),
@@ -72,12 +66,8 @@ pub async fn handle_photo_message(
     bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto).await?;
 
     // 5. Resize
-    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension, config.image.jpeg_quality).map_err(
-        |e| {
-            error!(error = %e, "Failed to resize photo");
-            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        },
-    )?;
+    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension, config.image.jpeg_quality)
+        .inspect_err(|e| error!(error = %e, "Failed to resize photo"))?;
 
     // 6. EXIF from original bytes
     let exif_data = crate::image::exif::extract_exif(&bytes);
@@ -124,13 +114,11 @@ pub async fn handle_photo_message(
     };
 
     // 11. Get daily note directory
-    let note_path = vault.ensure_today().await.map_err(|e| {
-        error!(error = %e, "Failed to ensure today's daily note before saving photo");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
-    let note_dir = note_path.parent().ok_or("Daily note has no parent directory").map_err(|e| {
-        error!(error = %e, "Failed to resolve daily note parent directory");
-        Box::new(ImageError::SaveFailed(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    let note_path = vault.ensure_today().await
+        .inspect_err(|e| error!(error = %e, "Failed to ensure today's daily note before saving photo"))?;
+    let note_dir = note_path.parent().ok_or_else(|| {
+        error!("Failed to resolve daily note parent directory");
+        AppError::Image(ImageError::SaveFailed("Daily note has no parent directory".to_string()))
     })?;
 
     // 12. Save image
@@ -141,10 +129,7 @@ pub async fn handle_photo_message(
         &filename,
     )
     .await
-    .map_err(|e| {
-        error!(error = %e, "Failed to save photo to assets folder");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    .inspect_err(|e| error!(error = %e, "Failed to save photo to assets folder"))?;
 
     info!(
         path = %saved_path.display(),
@@ -168,19 +153,15 @@ pub async fn handle_photo_message(
         ),
     };
 
-    vault.append_to_section("## 📝 Notes", &content).await.map_err(|e| {
-        error!(error = %e, "Failed to append photo entry to daily note");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    vault.append_to_section("## 📝 Notes", &content).await
+        .inspect_err(|e| error!(error = %e, "Failed to append photo entry to daily note"))?;
 
     // 14. Update frontmatter if present
     if let Ok(c) = &classified {
         if let Some(ref frontmatter) = c.frontmatter {
             if !frontmatter.is_empty() {
-                vault.update_frontmatter(frontmatter).await.map_err(|e| {
-                    error!(error = %e, "Failed to update frontmatter from photo classification");
-                    Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-                })?;
+                vault.update_frontmatter(frontmatter).await
+                    .inspect_err(|e| error!(error = %e, "Failed to update frontmatter from photo classification"))?;
             }
         }
     }

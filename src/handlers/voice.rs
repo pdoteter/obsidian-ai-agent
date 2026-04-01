@@ -8,6 +8,7 @@ use crate::ai::client::OpenRouterClient;
 use crate::ai::transcribe::WhisperClient;
 use crate::audio::download;
 use crate::config::Config;
+use crate::error::AppResult;
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
@@ -24,7 +25,7 @@ pub async fn handle_voice_message(
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<()> {
     // Extract voice from the message
     let voice = match msg.voice() {
         Some(v) => v.clone(),
@@ -51,10 +52,8 @@ pub async fn handle_voice_message(
     bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
     // Step 1: Download voice to memory (Ogg Opus bytes)
-    let audio_bytes = download::download_voice_to_memory(&bot, &voice).await.map_err(|e| {
-        error!(error = %e, "Failed to download voice message");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    let audio_bytes = download::download_voice_to_memory(&bot, &voice).await
+        .inspect_err(|e| error!(error = %e, "Failed to download voice message"))?;
 
     // Step 2: Transcribe via OpenAI Whisper (accepts .oga natively, no ffmpeg needed)
     bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
@@ -85,9 +84,7 @@ pub async fn handle_voice_message(
         Err(e) => {
             error!(error = %e, "Classification failed, saving as raw log");
             let (section, content) = writer::format_raw_entry(&transcript);
-            vault.append_to_section(section, &content).await.map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            vault.append_to_section(section, &content).await?;
             bot.send_message(
                 msg.chat.id,
                 format!(
@@ -105,16 +102,12 @@ pub async fn handle_voice_message(
 
     // Step 4: Write to vault
     let (section, content) = writer::format_for_daily_note(&classified);
-    vault.append_to_section(section, &content).await.map_err(|e| {
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    vault.append_to_section(section, &content).await?;
 
     // Update frontmatter if AI provided any
     if let Some(ref frontmatter) = classified.frontmatter {
         if !frontmatter.is_empty() {
-            vault.update_frontmatter(frontmatter).await.map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            vault.update_frontmatter(frontmatter).await?;
         }
     }
 

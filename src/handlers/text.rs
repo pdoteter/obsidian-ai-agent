@@ -5,6 +5,7 @@ use tracing::{error, info};
 
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
+use crate::error::AppResult;
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::handlers::url::TranscriptPending;
@@ -22,7 +23,7 @@ pub async fn handle_text_message(
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
     transcript_pending: TranscriptPending,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<()> {
     let text = match msg.text() {
         Some(t) => t.to_string(),
         None => return Ok(()),

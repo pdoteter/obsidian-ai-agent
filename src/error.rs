@@ -111,13 +111,15 @@ pub enum GitError {
 
 /// Top-level application error type
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)]
 pub enum AppError {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
 
     #[error("Telegram error: {0}")]
     Telegram(#[from] teloxide::RequestError),
+
+    #[error("Telegram download error: {0}")]
+    Download(#[from] teloxide::DownloadError),
 
     #[error("Audio processing error: {0}")]
     Audio(#[from] AudioError),
@@ -136,8 +138,10 @@ pub enum AppError {
 
     #[error("URL processing error: {0}")]
     Url(#[from] UrlError),
+
+    #[error("Handler error: {0}")]
+    Handler(String),
 }
 
 /// Convenience type alias
-#[allow(dead_code)]
 pub type AppResult<T> = Result<T, AppError>;

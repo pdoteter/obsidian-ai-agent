@@ -19,6 +19,7 @@ use tracing::{error, info, warn};
 use ai::client::OpenRouterClient;
 use ai::transcribe::WhisperClient;
 use config::Config;
+use error::AppError;
 use git::chat_tracker;
 use git::conflict;
 use git::debounce;
@@ -27,6 +28,11 @@ use handlers::url::TranscriptPending;
 use vault::daily_note::DailyNoteManager;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+/// Convert AppError to HandlerResult for teloxide dispatcher compatibility
+fn into_handler_error(e: AppError) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(e)
+}
 
 #[tokio::main]
 async fn main() {
@@ -176,9 +182,11 @@ async fn handle_message(
     if msg.photo().is_some() {
         handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker)
             .await
+            .map_err(into_handler_error)
     } else if msg.voice().is_some() {
         handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier, chat_tracker)
             .await
+            .map_err(into_handler_error)
     } else if msg.text().is_some() {
         handlers::text::handle_text_message(
             bot,
@@ -191,6 +199,7 @@ async fn handle_message(
             transcript_pending,
         )
         .await
+        .map_err(into_handler_error)
     } else {
         bot.send_message(
             msg.chat.id,
@@ -242,7 +251,8 @@ async fn handle_callback(
                 config,
                 sync_notifier,
             )
-            .await;
+            .await
+            .map_err(into_handler_error);
         } else if data.starts_with("conflict:") {
             return conflict::handle_conflict_callback(bot, q, conflict_pending).await;
         }

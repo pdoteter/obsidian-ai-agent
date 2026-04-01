@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
+use crate::error::{AppError, AppResult};
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::url::detect::{DetectedUrl, UrlType};
@@ -42,7 +43,7 @@ pub async fn handle_url_message(
     transcript_pending: TranscriptPending,
     urls: Vec<DetectedUrl>,
     surrounding_text: Option<String>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<()> {
     if urls.is_empty() {
         return Ok(());
     }
@@ -347,11 +348,11 @@ pub async fn handle_transcript_callback(
     vault: Arc<DailyNoteManager>,
     config: Arc<Config>,
     sync_notifier: Option<SyncNotifier>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let data = q.data.as_ref().ok_or("No callback data")?;
+) -> AppResult<()> {
+    let data = q.data.as_ref().ok_or_else(|| AppError::Handler("No callback data".to_string()))?;
     let short_id = data
         .strip_prefix("yt_transcript:")
-        .ok_or("Invalid callback format")?;
+        .ok_or_else(|| AppError::Handler("Invalid callback format".to_string()))?;
 
     // Acknowledge callback immediately to stop Telegram loading spinner.
     bot.answer_callback_query(&q.id).await?;
@@ -604,7 +605,7 @@ fn format_result_item(title: Option<&str>, url: &str, success: bool) -> String {
 async fn fetch_for_url_type(
     detected_url: &DetectedUrl,
     config: &Config,
-) -> Result<PageContent, Box<dyn std::error::Error + Send + Sync>> {
+) -> AppResult<PageContent> {
     match &detected_url.url_type {
         UrlType::YouTube { video_id } => {
             // Parallel fetch: metadata + description
@@ -614,8 +615,7 @@ async fn fetch_for_url_type(
             );
 
             // Metadata must succeed (same error handling as before)
-            let metadata = metadata_result
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            let metadata = metadata_result?;
 
             info!(
                 video_id = %video_id,
@@ -656,8 +656,7 @@ async fn fetch_for_url_type(
                 config.url.fetch_timeout_secs,
                 config.url.max_content_bytes,
             )
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
+            .await?;
 
             info!(
                 url = %detected_url.url,
