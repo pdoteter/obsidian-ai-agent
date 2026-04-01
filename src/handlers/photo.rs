@@ -31,7 +31,7 @@ pub async fn handle_photo_message(
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id).await;
+    chat_tracker.set(msg.chat.id);
 
     // 2. Extract photo (highest resolution)
     let photos = msg.photo().ok_or("No photo in message").map_err(|e| {

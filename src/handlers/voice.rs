@@ -40,7 +40,7 @@ pub async fn handle_voice_message(
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id).await;
+    chat_tracker.set(msg.chat.id);
 
     info!(
         duration_secs = %voice.duration,

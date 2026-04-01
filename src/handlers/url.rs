@@ -56,7 +56,7 @@ pub async fn handle_url_message(
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id).await;
+    chat_tracker.set(msg.chat.id);
 
     // 2) enforce max URL limit
     let max_urls = config.url.max_urls_per_message;

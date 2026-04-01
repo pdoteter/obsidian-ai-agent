@@ -116,7 +116,7 @@ pub fn spawn_debounced_sync(
                                 resolving.store(true, Ordering::SeqCst);
 
                                 // Get chat_id from tracker
-                                let chat_id = match chat_tracker.get().await {
+                                let chat_id = match chat_tracker.get() {
                                     Some(id) => id,
                                     None => {
                                         error!("No chat_id available for conflict notification — skipping Telegram notification");

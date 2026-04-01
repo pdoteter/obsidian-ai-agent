@@ -228,7 +228,7 @@ async fn handle_callback(
 
     // Track latest active chat on callbacks when available.
     if let Some(ref msg) = q.message {
-        chat_tracker.set(msg.chat().id).await;
+        chat_tracker.set(msg.chat().id);
     }
 
     if let Some(ref data) = q.data {
