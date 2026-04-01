@@ -4,27 +4,18 @@ use teloxide::types::ChatAction;
 
 use tracing::{debug, error, info};
 
-use crate::ai::client::OpenRouterClient;
 use crate::ai::transcribe::WhisperClient;
 use crate::audio::download;
-use crate::config::Config;
 use crate::error::AppResult;
-use crate::git::chat_tracker::ChatIdTracker;
-use crate::git::debounce::SyncNotifier;
-use crate::vault::daily_note::DailyNoteManager;
+use crate::handlers::HandlerContext;
 use crate::vault::writer;
 
-/// Handle incoming voice messages: download → transcribe (Whisper) → classify → write to vault
-#[allow(clippy::too_many_arguments)]
+/// Handle incoming voice messages: download -> transcribe (Whisper) -> classify -> write to vault
 pub async fn handle_voice_message(
     bot: Bot,
     msg: Message,
-    config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ctx: HandlerContext,
     whisper_client: Arc<WhisperClient>,
-    vault: Arc<DailyNoteManager>,
-    sync_notifier: Option<SyncNotifier>,
-    chat_tracker: ChatIdTracker,
 ) -> AppResult<()> {
     // Extract voice from the message
     let voice = match msg.voice() {
@@ -34,14 +25,14 @@ pub async fn handle_voice_message(
 
     // Check user authorization
     if let Some(user) = msg.from.as_ref() {
-        if !config.is_user_allowed(user.id.0) {
+        if !ctx.config.is_user_allowed(user.id.0) {
             info!(user_id = user.id.0, "Unauthorized user, ignoring voice message");
             return Ok(());
         }
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id);
+    ctx.chat_tracker.set(msg.chat.id);
 
     info!(
         duration_secs = %voice.duration,
@@ -64,7 +55,7 @@ pub async fn handle_voice_message(
             error!(error = %e, "Transcription failed");
             bot.send_message(
                 msg.chat.id,
-                format!("❌ Transcription failed: {}", e),
+                format!("Transcription failed: {}", e),
             )
             .await?;
             return Ok(());
@@ -75,52 +66,48 @@ pub async fn handle_voice_message(
     debug!(transcript = %transcript, "Full transcript");
 
     // Step 3: Classify the transcribed text
-    let guide = crate::ai::guide::load_guide(&config.guide_path);
-    let classified = match ai_client
-        .classify_text(&transcript, &config.openrouter_model_classify, guide.as_deref())
+    let guide = crate::ai::guide::load_guide(&ctx.config.guide_path);
+    let classified = match ctx.ai_client
+        .classify_text(&transcript, &ctx.config.openrouter_model_classify, guide.as_deref())
         .await
     {
         Ok(c) => c,
         Err(e) => {
             error!(error = %e, "Classification failed, saving as raw log");
             let (section, content) = writer::format_raw_entry(&transcript);
-            vault.append_to_section(section, &content).await?;
+            ctx.vault.append_to_section(section, &content).await?;
             bot.send_message(
                 msg.chat.id,
                 format!(
-                    "📝 Transcribed & saved as raw log (classification failed)\n\n\"{}\"",
+                    "Transcribed & saved as raw log (classification failed)\n\n\"{}\"",
                     truncate(&transcript, 200),
                 ),
             )
             .await?;
-            if let Some(n) = sync_notifier.as_ref() {
-                n.notify();
-            }
+            ctx.notify_sync();
             return Ok(());
         }
     };
 
     // Step 4: Write to vault
     let (section, content) = writer::format_for_daily_note(&classified);
-    vault.append_to_section(section, &content).await?;
+    ctx.vault.append_to_section(section, &content).await?;
 
     // Update frontmatter if AI provided any
     if let Some(ref frontmatter) = classified.frontmatter {
         if !frontmatter.is_empty() {
-            vault.update_frontmatter(frontmatter).await?;
+            ctx.vault.update_frontmatter(frontmatter).await?;
         }
     }
 
     // Notify git sync
-    if let Some(ref notifier) = sync_notifier {
-        notifier.notify();
-    }
+    ctx.notify_sync();
 
     // Step 5: Send confirmation
     bot.send_message(
         msg.chat.id,
         format!(
-            "✅ Voice → {} saved as {}\n\nTranscript: \"{}\"",
+            "Voice -> {} saved as {}\n\nTranscript: \"{}\"",
             classified.category,
             classified.summary,
             truncate(&transcript, 200),

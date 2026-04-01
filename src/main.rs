@@ -25,6 +25,7 @@ use git::conflict;
 use git::debounce;
 use git::sync::GitSync;
 use handlers::url::TranscriptPending;
+use handlers::HandlerContext;
 use vault::daily_note::DailyNoteManager;
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -121,6 +122,15 @@ async fn main() {
         None
     };
 
+    // Create shared handler context
+    let handler_ctx = HandlerContext::new(
+        config.clone(),
+        ai_client.clone(),
+        vault.clone(),
+        sync_notifier.clone(),
+        chat_tracker.clone(),
+    );
+
     info!(
         vault_path = %config.vault_path.display(),
         git_sync_enabled = config.git_sync_enabled,
@@ -143,7 +153,7 @@ async fn main() {
             vault.clone(),
             sync_notifier.clone(),
             conflict_pending.clone(),
-            chat_tracker.clone(),
+            handler_ctx.clone(),
             transcript_pending.clone()
         ])
         .default_handler(|upd| async move {
@@ -166,40 +176,26 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .branch(callback_handler)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_message(
     bot: Bot,
     msg: Message,
-    config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ctx: HandlerContext,
     whisper_client: Arc<WhisperClient>,
-    vault: Arc<DailyNoteManager>,
-    sync_notifier: Option<debounce::SyncNotifier>,
-    chat_tracker: chat_tracker::ChatIdTracker,
     transcript_pending: TranscriptPending,
 ) -> HandlerResult {
     // Route based on message content type
     if msg.photo().is_some() {
-        handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker)
+        handlers::photo::handle_photo_message(bot, msg, ctx)
             .await
             .map_err(into_handler_error)
     } else if msg.voice().is_some() {
-        handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier, chat_tracker)
+        handlers::voice::handle_voice_message(bot, msg, ctx, whisper_client)
             .await
             .map_err(into_handler_error)
     } else if msg.text().is_some() {
-        handlers::text::handle_text_message(
-            bot,
-            msg,
-            config,
-            ai_client,
-            vault,
-            sync_notifier,
-            chat_tracker,
-            transcript_pending,
-        )
-        .await
-        .map_err(into_handler_error)
+        handlers::text::handle_text_message(bot, msg, ctx, transcript_pending)
+            .await
+            .map_err(into_handler_error)
     } else {
         bot.send_message(
             msg.chat.id,
@@ -210,7 +206,6 @@ async fn handle_message(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_callback(
     bot: Bot,
     q: CallbackQuery,
@@ -227,7 +222,7 @@ async fn handle_callback(
     ai_client: Arc<OpenRouterClient>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
-    chat_tracker: chat_tracker::ChatIdTracker,
+    ctx: HandlerContext,
 ) -> HandlerResult {
     // Enforce same authorization policy as message handlers before processing callbacks.
     if !config.allowed_user_ids.is_empty() && !config.is_user_allowed(q.from.id.0) {
@@ -237,7 +232,7 @@ async fn handle_callback(
 
     // Track latest active chat on callbacks when available.
     if let Some(ref msg) = q.message {
-        chat_tracker.set(msg.chat().id);
+        ctx.chat_tracker.set(msg.chat().id);
     }
 
     if let Some(ref data) = q.data {

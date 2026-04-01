@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
-use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
+use crate::handlers::HandlerContext;
 use crate::url::detect::{DetectedUrl, UrlType};
 use crate::url::extract::fetch_page_content;
 use crate::url::youtube::{fetch_youtube_metadata, fetch_youtube_description};
@@ -30,16 +30,11 @@ pub type TranscriptPending = Arc<Mutex<HashMap<String, TranscriptRequest>>>;
 
 /// Handle URLs found in Telegram messages
 ///
-/// Pipeline: fetch content → AI summarize → format TODO → write to vault
-#[allow(clippy::too_many_arguments)]
+/// Pipeline: fetch content -> AI summarize -> format TODO -> write to vault
 pub async fn handle_url_message(
     bot: Bot,
     msg: Message,
-    config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
-    vault: Arc<DailyNoteManager>,
-    sync_notifier: Option<SyncNotifier>,
-    chat_tracker: ChatIdTracker,
+    ctx: HandlerContext,
     transcript_pending: TranscriptPending,
     urls: Vec<DetectedUrl>,
     surrounding_text: Option<String>,
@@ -50,17 +45,17 @@ pub async fn handle_url_message(
 
     // 1) auth check
     if let Some(user) = msg.from.as_ref() {
-        if !config.is_user_allowed(user.id.0) {
+        if !ctx.config.is_user_allowed(user.id.0) {
             info!(user_id = user.id.0, "Unauthorized user, ignoring URL message");
             return Ok(());
         }
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id);
+    ctx.chat_tracker.set(msg.chat.id);
 
     // 2) enforce max URL limit
-    let max_urls = config.url.max_urls_per_message;
+    let max_urls = ctx.config.url.max_urls_per_message;
     let total_urls = urls.len();
     let (urls_to_process, truncated) = enforce_url_limit(urls, max_urls);
 
@@ -93,25 +88,25 @@ pub async fn handle_url_message(
         // Direct transcript flow for keyword-triggered requests
         if is_transcript_direct_flow {
             if let UrlType::YouTube { video_id } = &detected_url.url_type {
-                bot.send_message(msg.chat.id, "⏳ Fetching transcript...")
+                bot.send_message(msg.chat.id, "Fetching transcript...")
                     .await?;
 
                 let transcript_text = match crate::url::fetch_transcript(video_id).await {
                     Ok(text) => text,
                     Err(e) => {
                         error!(error = %e, video_id = %video_id, "Failed to fetch transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch transcript: {}", e))
+                        bot.send_message(msg.chat.id, format!("Failed to fetch transcript: {}", e))
                             .await?;
                         continue;
                     }
                 };
 
                 // Fetch metadata for title
-                let fetched_page = match fetch_for_url_type(detected_url, &config).await {
+                let fetched_page = match fetch_for_url_type(detected_url, &ctx.config).await {
                     Ok(page) => page,
                     Err(e) => {
                         error!(error = %e, url = %detected_url.url, "Failed to fetch YouTube metadata");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch video metadata: {}", e))
+                        bot.send_message(msg.chat.id, format!("Failed to fetch video metadata: {}", e))
                             .await?;
                         continue;
                     }
@@ -124,12 +119,12 @@ pub async fn handle_url_message(
                     url: detected_url.url.clone(),
                 };
 
-                let guide = crate::ai::guide::load_guide(&config.guide_path);
-                let summary = match ai_client
+                let guide = crate::ai::guide::load_guide(&ctx.config.guide_path);
+                let summary = match ctx.ai_client
                     .summarize_url(
                         &page_content,
                         None,
-                        &config.openrouter_model_classify,
+                        &ctx.config.openrouter_model_classify,
                         guide.as_deref(),
                     )
                     .await
@@ -137,7 +132,7 @@ pub async fn handle_url_message(
                     Ok(s) => s,
                     Err(e) => {
                         error!(error = %e, url = %detected_url.url, "Failed to summarize transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to summarize transcript: {}", e))
+                        bot.send_message(msg.chat.id, format!("Failed to summarize transcript: {}", e))
                             .await?;
                         continue;
                     }
@@ -148,8 +143,8 @@ pub async fn handle_url_message(
                     .unwrap_or_else(|| detected_url.url.clone());
 
                 let transcript_file = match crate::vault::save_transcript(
-                    std::path::Path::new(&config.vault_path),
-                    &config.url.transcript_folder,
+                    std::path::Path::new(&ctx.config.vault_path),
+                    &ctx.config.url.transcript_folder,
                     video_id,
                     &video_title,
                     &summary.summary,
@@ -161,24 +156,22 @@ pub async fn handle_url_message(
                     Ok(file) => file,
                     Err(e) => {
                         error!(error = %e, video_id = %video_id, "Failed to save transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to save transcript: {}", e))
+                        bot.send_message(msg.chat.id, format!("Failed to save transcript: {}", e))
                             .await?;
                         continue;
                     }
                 };
 
                 let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
-                if let Err(e) = vault.append_to_section("## ✅ Todos", &wiki_link_entry).await {
+                if let Err(e) = ctx.vault.append_to_section("## Todos", &wiki_link_entry).await {
                     warn!(error = %e, "Failed to add transcript wiki-link to daily note");
                 }
 
-                if let Some(ref notifier) = sync_notifier {
-                    notifier.notify();
-                }
+                ctx.notify_sync();
 
                 bot.send_message(
                     msg.chat.id,
-                    format!("✅ Transcript saved: {}", transcript_file.wiki_link),
+                    format!("Transcript saved: {}", transcript_file.wiki_link),
                 )
                 .await?;
 
@@ -193,7 +186,7 @@ pub async fn handle_url_message(
         }
 
         // Normal fast-mode flow for non-transcript URLs
-        let fetched_page = fetch_for_url_type(detected_url, &config).await;
+        let fetched_page = fetch_for_url_type(detected_url, &ctx.config).await;
 
         // Extract raw oEmbed title before AI processing for YouTube heading
         let raw_youtube_title = if let Ok(page_content) = &fetched_page {
@@ -227,18 +220,18 @@ pub async fn handle_url_message(
                     );
 
                     transcript_buttons.push(InlineKeyboardButton::callback(
-                        "📝 Full Transcript",
+                        "Full Transcript",
                         format!("yt_transcript:{}", short_id),
                     ));
                 }
 
-                let guide = crate::ai::guide::load_guide(&config.guide_path);
+                let guide = crate::ai::guide::load_guide(&ctx.config.guide_path);
 
-                match ai_client
+                match ctx.ai_client
                     .summarize_url(
                         &page_content,
                         surrounding_text.as_deref(),
-                        &config.openrouter_model_classify,
+                        &ctx.config.openrouter_model_classify,
                         guide.as_deref(),
                     )
                     .await
@@ -282,7 +275,7 @@ pub async fn handle_url_message(
             video_name,
         );
 
-        match vault.append_to_section(section, &content).await {
+        match ctx.vault.append_to_section(section, &content).await {
             Ok(_) => {
                 success_count += 1;
                 results.push(format_result_item(
@@ -304,9 +297,7 @@ pub async fn handle_url_message(
 
     // 5) notify git sync once
     if success_count > 0 {
-        if let Some(ref notifier) = sync_notifier {
-            notifier.notify();
-        }
+        ctx.notify_sync();
     }
 
     // 6) edit processing message to final confirmation
@@ -339,7 +330,6 @@ pub async fn handle_url_message(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_transcript_callback(
     bot: Bot,
     q: CallbackQuery,

@@ -1,37 +1,27 @@
-use std::sync::Arc;
-
 use teloxide::net::Download;
 use teloxide::prelude::*;
 use teloxide::types::ChatAction;
 use tracing::{error, info};
 
-use crate::ai::client::OpenRouterClient;
-use crate::config::Config;
 use crate::error::{AppError, AppResult, ImageError};
-use crate::git::chat_tracker::ChatIdTracker;
-use crate::git::debounce::SyncNotifier;
-use crate::vault::daily_note::DailyNoteManager;
+use crate::handlers::HandlerContext;
 
-/// Handle incoming photo messages: download → resize → EXIF → classify → save → append to vault
+/// Handle incoming photo messages: download -> resize -> EXIF -> classify -> save -> append to vault
 pub async fn handle_photo_message(
     bot: Bot,
     msg: Message,
-    config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
-    vault: Arc<DailyNoteManager>,
-    sync_notifier: Option<SyncNotifier>,
-    chat_tracker: ChatIdTracker,
+    ctx: HandlerContext,
 ) -> AppResult<()> {
     // 1. Auth check
     if let Some(user) = msg.from.as_ref() {
-        if !config.is_user_allowed(user.id.0) {
+        if !ctx.config.is_user_allowed(user.id.0) {
             info!(user_id = user.id.0, "Unauthorized user, ignoring photo");
             return Ok(());
         }
     }
 
     // Track chat_id for conflict notifications (after auth check)
-    chat_tracker.set(msg.chat.id);
+    ctx.chat_tracker.set(msg.chat.id);
 
     // 2. Extract photo (highest resolution)
     let photos = msg.photo().ok_or_else(|| {
@@ -66,7 +56,7 @@ pub async fn handle_photo_message(
     bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto).await?;
 
     // 5. Resize
-    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension, config.image.jpeg_quality)
+    let resized = crate::image::process::resize_image(&bytes, ctx.config.image.max_dimension, ctx.config.image.jpeg_quality)
         .inspect_err(|e| error!(error = %e, "Failed to resize photo"))?;
 
     // 6. EXIF from original bytes
@@ -79,13 +69,13 @@ pub async fn handle_photo_message(
     let base64 = crate::image::process::encode_base64(&resized);
 
     // 9. AI vision classification with guide
-    let guide = crate::ai::guide::load_guide(&config.guide_path);
-    let classified = ai_client
+    let guide = crate::ai::guide::load_guide(&ctx.config.guide_path);
+    let classified = ctx.ai_client
         .classify_image(
             &base64,
             caption.as_deref(),
             &exif_context,
-            &config.openrouter_model_classify,
+            &ctx.config.openrouter_model_classify,
             guide.as_deref(),
         )
         .await;
@@ -114,7 +104,7 @@ pub async fn handle_photo_message(
     };
 
     // 11. Get daily note directory
-    let note_path = vault.ensure_today().await
+    let note_path = ctx.vault.ensure_today().await
         .inspect_err(|e| error!(error = %e, "Failed to ensure today's daily note before saving photo"))?;
     let note_dir = note_path.parent().ok_or_else(|| {
         error!("Failed to resolve daily note parent directory");
@@ -125,7 +115,7 @@ pub async fn handle_photo_message(
     let saved_path = crate::image::process::save_image(
         &resized,
         note_dir,
-        &config.image.assets_folder,
+        &ctx.config.image.assets_folder,
         &filename,
     )
     .await
@@ -140,39 +130,37 @@ pub async fn handle_photo_message(
     // 13. Write to daily note
     let content = match &classified {
         Ok(c) => format_photo_content(
-            &config.image.assets_folder,
+            &ctx.config.image.assets_folder,
             &filename,
             Some(&c.markdown),
             None,
         ),
         Err(_) => format_photo_content(
-            &config.image.assets_folder,
+            &ctx.config.image.assets_folder,
             &filename,
             None,
             caption.as_deref(),
         ),
     };
 
-    vault.append_to_section("## 📝 Notes", &content).await
+    ctx.vault.append_to_section("## Notes", &content).await
         .inspect_err(|e| error!(error = %e, "Failed to append photo entry to daily note"))?;
 
     // 14. Update frontmatter if present
     if let Ok(c) = &classified {
         if let Some(ref frontmatter) = c.frontmatter {
             if !frontmatter.is_empty() {
-                vault.update_frontmatter(frontmatter).await
+                ctx.vault.update_frontmatter(frontmatter).await
                     .inspect_err(|e| error!(error = %e, "Failed to update frontmatter from photo classification"))?;
             }
         }
     }
 
     // 15. Notify git sync
-    if let Some(ref notifier) = sync_notifier {
-        notifier.notify();
-    }
+    ctx.notify_sync();
 
     // 16. Send confirmation
-    bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
+    bot.send_message(msg.chat.id, format!("Photo saved -- {}", summary))
         .await?;
 
     Ok(())
