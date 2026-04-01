@@ -2,7 +2,7 @@ use crate::error::ImageError;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-pub fn resize_image(bytes: &[u8], max_dimension: u32) -> Result<Vec<u8>, ImageError> {
+pub fn resize_image(bytes: &[u8], max_dimension: u32, jpeg_quality: u8) -> Result<Vec<u8>, ImageError> {
     // Decode the image
     let img = image::load_from_memory(bytes)
         .map_err(|e| ImageError::ResizeFailed(format!("Failed to decode image: {}", e)))?;
@@ -40,7 +40,7 @@ pub fn resize_image(bytes: &[u8], max_dimension: u32) -> Result<Vec<u8>, ImageEr
     let mut buffer = Vec::new();
     let mut cursor = Cursor::new(&mut buffer);
     
-    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 85);
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, jpeg_quality);
     image::DynamicImage::ImageRgb8(rgb_image)
         .write_with_encoder(encoder)
         .map_err(|e| ImageError::ResizeFailed(format!("Failed to encode JPEG: {}", e)))?;
@@ -149,7 +149,7 @@ mod tests {
         // Create 3000x2000 image (aspect 1.5)
         let bytes = create_test_image(3000, 2000, [255, 0, 0]);
         
-        let resized = resize_image(&bytes, 1280).expect("Resize failed");
+        let resized = resize_image(&bytes, 1280, 85).expect("Resize failed");
         
         // Decode to verify dimensions
         let img = image::load_from_memory(&resized).expect("Failed to decode resized image");
@@ -165,7 +165,7 @@ mod tests {
         // Create 800x600 image
         let bytes = create_test_image(800, 600, [0, 255, 0]);
         
-        let result = resize_image(&bytes, 1280).expect("Resize failed");
+        let result = resize_image(&bytes, 1280, 85).expect("Resize failed");
         
         // Decode to verify no upscaling
         let img = image::load_from_memory(&result).expect("Failed to decode");
@@ -179,7 +179,7 @@ mod tests {
         // Create 1000x3000 image (taller than wide, aspect 0.333)
         let bytes = create_test_image(1000, 3000, [0, 0, 255]);
         
-        let resized = resize_image(&bytes, 1280).expect("Resize failed");
+        let resized = resize_image(&bytes, 1280, 85).expect("Resize failed");
         
         let img = image::load_from_memory(&resized).expect("Failed to decode resized image");
         
@@ -193,7 +193,7 @@ mod tests {
     fn test_encode_jpeg() {
         let bytes = create_test_image(100, 100, [128, 128, 128]);
         
-        let resized = resize_image(&bytes, 1280).expect("Resize failed");
+        let resized = resize_image(&bytes, 1280, 85).expect("Resize failed");
         
         // Verify JPEG magic bytes (FF D8)
         assert_eq!(resized[0], 0xFF);

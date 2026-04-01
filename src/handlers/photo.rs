@@ -72,7 +72,7 @@ pub async fn handle_photo_message(
     bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto).await?;
 
     // 5. Resize
-    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension).map_err(
+    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension, config.image.jpeg_quality).map_err(
         |e| {
             error!(error = %e, "Failed to resize photo");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
