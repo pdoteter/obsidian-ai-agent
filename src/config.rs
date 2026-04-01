@@ -307,6 +307,7 @@ impl Default for UrlConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_url_config_defaults() {
@@ -417,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_guide_path_resolves_relative_to_config() {
         // Verify guide_path is resolved relative to config file directory when relative
         use tempfile::tempdir;
@@ -465,6 +467,7 @@ git:
     }
 
     #[test]
+    #[serial]
     fn test_guide_path_absolute_unchanged() {
         // Verify absolute guide_path values are not modified
         use tempfile::tempdir;

@@ -61,3 +61,7 @@ regex = "1"
 opt-level = 3
 lto = true
 strip = true
+
+[dev-dependencies]
+# Serial test execution for env::set_var tests
+serial_test = "3"
