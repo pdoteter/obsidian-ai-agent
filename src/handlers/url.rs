@@ -544,7 +544,7 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
     if header_end_idx == 0 {
         let mut result = confirmation;
         if result.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-            result.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
+            truncate_to_char_boundary(&mut result, TELEGRAM_MAX_MESSAGE_LENGTH - 3);
             result.push_str("...");
         }
         return result;
@@ -569,13 +569,27 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
         message.push_str(&format!("\n\n... ({} more URLs not shown)", removed_count));
     }
 
-    // Final safety: hard truncate if still too long
+    // Final safety: hard truncate if still too long (char-boundary safe)
     if message.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-        message.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
+        truncate_to_char_boundary(&mut message, TELEGRAM_MAX_MESSAGE_LENGTH - 3);
         message.push_str("...");
     }
 
     message
+}
+
+/// Truncate a string to at most `max_bytes` bytes, ensuring we don't split a UTF-8 char.
+/// Finds the largest valid char boundary at or before `max_bytes`.
+fn truncate_to_char_boundary(s: &mut String, max_bytes: usize) {
+    if s.len() <= max_bytes {
+        return;
+    }
+    // Find the largest char boundary <= max_bytes
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    s.truncate(end);
 }
 
 fn format_result_item(title: Option<&str>, url: &str, success: bool) -> String {
@@ -729,5 +743,46 @@ mod tests {
         assert_eq!(with_title, "✅ Readable title");
         assert!(with_url.starts_with("❌ https://example.com/path"));
         assert!(with_url.ends_with("(write failed)"));
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_ascii() {
+        let mut s = "hello world".to_string();
+        truncate_to_char_boundary(&mut s, 5);
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_unicode() {
+        // "日本語" = 9 bytes (3 chars × 3 bytes each)
+        let mut s = "日本語".to_string();
+        assert_eq!(s.len(), 9);
+        
+        // Truncate to 5 bytes — can't fit second char, so stop at 3
+        truncate_to_char_boundary(&mut s, 5);
+        assert_eq!(s, "日"); // Only first char (3 bytes)
+        
+        // Truncate at exact boundary
+        let mut s2 = "日本語".to_string();
+        truncate_to_char_boundary(&mut s2, 6);
+        assert_eq!(s2, "日本"); // Two chars (6 bytes)
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_emoji() {
+        // "👋🌍" = 8 bytes (2 emoji × 4 bytes each)
+        let mut s = "👋🌍".to_string();
+        assert_eq!(s.len(), 8);
+        
+        // Truncate to 5 bytes — can't fit any of second emoji
+        truncate_to_char_boundary(&mut s, 5);
+        assert_eq!(s, "👋"); // Only first emoji (4 bytes)
+    }
+
+    #[test]
+    fn test_truncate_to_char_boundary_no_truncation_needed() {
+        let mut s = "short".to_string();
+        truncate_to_char_boundary(&mut s, 100);
+        assert_eq!(s, "short");
     }
 }
