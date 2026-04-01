@@ -75,7 +75,7 @@ pub fn format_url_todo(
 
     // Append transcript wiki-link if present
     let title_line = if let Some(transcript_link) = transcript_link {
-        format!("{} — [[{}]]", title_line, transcript_link)
+        format!("{} — {}", title_line, transcript_link)
     } else {
         title_line
     };
@@ -199,7 +199,7 @@ mod tests {
             Some("Example"),
             Some("This is a summary"),
             &["web".to_string(), "example".to_string()],
-            Some("transcripts/2026-03-25-video-title"),
+            Some("[[transcripts/2026-03-25-video-title]]"),
             None,
         );
         assert_eq!(section, "## ✅ Todos");
@@ -329,7 +329,7 @@ mod tests {
             Some("Advanced Rust Patterns"),
             Some("Deep dive into Rust performance optimization"),
             &["rust".to_string(), "performance".to_string()],
-            Some("transcripts/2026-03-25-rust-patterns"),
+            Some("[[transcripts/2026-03-25-rust-patterns]]"),
             Some("Rust Conference Talk"),
         );
         assert_eq!(section, "## ✅ Todos");
