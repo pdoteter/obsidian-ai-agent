@@ -132,17 +132,5 @@ pub async fn handle_text_message(
     .await
     .ok(); // Don't fail on formatting issues
 
-    // Send plain fallback if markdown parsing failed
-    bot.send_message(
-        msg.chat.id,
-        format!(
-            "✅ Saved as {} — {}",
-            classified.category,
-            classified.summary,
-        ),
-    )
-    .await
-    .ok();
-
     Ok(())
 }
