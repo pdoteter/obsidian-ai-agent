@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
+use teloxide::types::ChatId;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
@@ -27,6 +28,10 @@ use git::sync::GitSync;
 use handlers::url::TranscriptPending;
 use handlers::HandlerContext;
 use vault::daily_note::DailyNoteManager;
+
+/// Build version embedded at compile time.
+/// CI builds pass BUILD_VERSION from Cargo.toml; local builds default to "0.1".
+const VERSION: &str = env!("BUILD_VERSION");
 
 type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -60,7 +65,7 @@ async fn main() {
         .with_thread_ids(false)
         .init();
 
-    info!("Starting Obsidian AI Agent...");
+    info!("Starting Obsidian AI Agent V{}...", VERSION);
 
     // Initialize OpenRouter client (for classification)
     let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
@@ -89,6 +94,15 @@ async fn main() {
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
+
+    // Send startup notification to admin (if configured)
+    if let Some(admin_chat_id) = config.admin_chat_id {
+        let startup_msg = format!("Started agent V{}", VERSION);
+        match bot.send_message(ChatId(admin_chat_id), &startup_msg).await {
+            Ok(_) => info!(chat_id = admin_chat_id, "Startup notification sent"),
+            Err(e) => warn!(error = %e, chat_id = admin_chat_id, "Failed to send startup notification"),
+        }
+    }
 
     // Initialize conflict resolver
     let conflict_resolver = conflict::ConflictResolver::new(bot.clone());

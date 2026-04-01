@@ -96,6 +96,9 @@ impl Default for AiConfig {
 struct AccessConfig {
     #[serde(default)]
     allowed_user_ids: Vec<u64>,
+
+    /// Chat ID to send startup notifications to (optional)
+    admin_chat_id: Option<i64>,
 }
 
 // Serde default helpers
@@ -166,6 +169,8 @@ pub struct Config {
     pub whisper_language: Option<String>,
     pub openrouter_model_classify: String,
     pub allowed_user_ids: Vec<u64>,
+    /// Chat ID to send startup notifications to (optional)
+    pub admin_chat_id: Option<i64>,
     pub timezone: String,
     /// Chrono strftime format for {{date}} in daily note templates
     pub date_display_format: String,
@@ -251,6 +256,7 @@ impl Config {
             whisper_language: file.ai.whisper_language.filter(|v| !v.is_empty()),
             openrouter_model_classify: file.ai.classify_model,
             allowed_user_ids: file.access.allowed_user_ids,
+            admin_chat_id: file.access.admin_chat_id,
             timezone: file.timezone,
             date_display_format: momentjs_to_chrono(&file.date_display_format),
             guide_path,

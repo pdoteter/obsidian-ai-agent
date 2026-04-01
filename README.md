@@ -132,6 +132,7 @@ ai:
 
 access:
   allowed_user_ids: []                      # default: [] (allow all)
+  admin_chat_id: 123456789                  # optional: chat ID for startup notifications
 
 guide_path: ./system-guide.md               # default: ./system-guide.md (optional)
 
@@ -160,6 +161,7 @@ log_level: info                             # default: info
 | `ai.whisper_language` | ❌ | Language code for Whisper (default: auto-detect) |
 | `ai.classify_model` | ❌ | OpenRouter model for classification (default: `google/gemini-2.5-flash`) |
 | `access.allowed_user_ids` | ❌ | Allowed Telegram user IDs (default: `[]` = all users) |
+| `access.admin_chat_id` | ❌ | Chat ID for startup notifications (e.g., your Telegram user ID) |
 | `guide_path` | ❌ | Path to custom AI guide file (default: `./system-guide.md`) |
 | `image.max_dimension` | ❌ | Maximum image dimension in pixels (default: 1280) |
 | `image.jpeg_quality` | ❌ | JPEG compression quality 1-100 (default: 85) |

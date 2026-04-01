@@ -1,7 +1,14 @@
 # ============================================
 # Stage 1: Build
 # ============================================
+# Build version passed from CI (defaults to Cargo.toml version if not set)
+ARG BUILD_VERSION
+
 FROM rust:1.94-bookworm AS builder
+
+# Pass build version into builder stage
+ARG BUILD_VERSION
+ENV BUILD_VERSION=${BUILD_VERSION}
 
 # Install build dependencies for openssl
 RUN apt-get update && apt-get install -y \
@@ -14,6 +21,7 @@ WORKDIR /app
 
 # Cache dependencies by copying only Cargo files first
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 
 # Create a dummy main.rs to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs

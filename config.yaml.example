@@ -23,6 +23,7 @@ ai:
 # Access control (optional — empty list allows all users)
 access:
   allowed_user_ids: []                    # Comma-separated Telegram user IDs, e.g. [123456, 789012]
+  # admin_chat_id: 123456789              # Chat ID for startup notifications (your Telegram user ID)
 
 # Path to custom AI guide (optional)
 # guide_path: ./system-guide.md           # Appended to AI prompt for all messages (default: ./system-guide.md)
