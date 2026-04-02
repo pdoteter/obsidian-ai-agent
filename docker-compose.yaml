@@ -1,7 +1,7 @@
 services:
   pkm-bot:
-    image: peterluxem/obsidian-ai-agent:latest
-    # build: .  # Uncomment to build locally instead of pulling from Docker Hub
+    #image: peterluxem/obsidian-ai-agent:latest
+    build: . # Uncomment to build locally instead of pulling from Docker Hub
     container_name: obsidian-ai-agent
     env_file:
       - .env.docker

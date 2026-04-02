@@ -8,8 +8,8 @@ mod image;
 mod url;
 mod vault;
 
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
@@ -42,6 +42,8 @@ fn into_handler_error(e: AppError) -> Box<dyn std::error::Error + Send + Sync> {
 
 #[tokio::main]
 async fn main() {
+    println!("Starting Obsidian AI Agent...");
+
     // Load .env file for API keys
     let _ = dotenvy::dotenv();
 
@@ -90,7 +92,13 @@ async fn main() {
     };
 
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
-    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone(), config.date_display_format.clone()).await);
+    let vault = Arc::new(
+        DailyNoteManager::new(
+            config.vault_path.clone(),
+            config.date_display_format.clone(),
+        )
+        .await,
+    );
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
@@ -100,7 +108,9 @@ async fn main() {
         let startup_msg = format!("Started agent V{}", VERSION);
         match bot.send_message(ChatId(admin_chat_id), &startup_msg).await {
             Ok(_) => info!(chat_id = admin_chat_id, "Startup notification sent"),
-            Err(e) => warn!(error = %e, chat_id = admin_chat_id, "Failed to send startup notification"),
+            Err(e) => {
+                warn!(error = %e, chat_id = admin_chat_id, "Failed to send startup notification")
+            }
         }
     }
 
@@ -116,7 +126,10 @@ async fn main() {
 
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
-        let git_path = config.git_path.clone().expect("GIT_PATH required when git sync enabled");
+        let git_path = config
+            .git_path
+            .clone()
+            .expect("GIT_PATH required when git sync enabled");
         let git_sync = Arc::new(GitSync::new(
             git_path,
             config.git_remote_name.clone(),
@@ -240,7 +253,10 @@ async fn handle_callback(
 ) -> HandlerResult {
     // Enforce same authorization policy as message handlers before processing callbacks.
     if !config.allowed_user_ids.is_empty() && !config.is_user_allowed(q.from.id.0) {
-        info!(user_id = q.from.id.0, "Unauthorized user, ignoring callback");
+        info!(
+            user_id = q.from.id.0,
+            "Unauthorized user, ignoring callback"
+        );
         return Ok(());
     }
 
