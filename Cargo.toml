@@ -32,7 +32,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 dotenvy = "0.15"
 
 # YAML config file
-serde_yml = "0.0.12"
+serde_yaml_ng = "0.10"
 
 # Temporary files (for audio processing)
 tempfile = "3"
