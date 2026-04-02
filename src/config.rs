@@ -184,55 +184,84 @@ impl Config {
     ///
     /// Config file path is resolved from `CONFIG_PATH` env var, defaulting to `./config.yaml`.
     pub fn load() -> Result<Self, ConfigError> {
+        println!("[DEBUG Config::load] Starting Config::load()");
         // Read secrets from environment
+        println!("[DEBUG Config::load] Reading TELOXIDE_TOKEN...");
         let teloxide_token =
             env::var("TELOXIDE_TOKEN").map_err(|_| ConfigError::Missing("TELOXIDE_TOKEN"))?;
+        println!("[DEBUG Config::load] Reading OPENROUTER_API_KEY...");
         let openrouter_api_key = env::var("OPENROUTER_API_KEY")
             .map_err(|_| ConfigError::Missing("OPENROUTER_API_KEY"))?;
+        println!("[DEBUG Config::load] Reading OPENAI_API_KEY...");
         let openai_api_key =
             env::var("OPENAI_API_KEY").map_err(|_| ConfigError::Missing("OPENAI_API_KEY"))?;
+        println!("[DEBUG Config::load] All env vars read successfully");
 
         // Load settings from YAML config file
+        println!("[DEBUG Config::load] Getting CONFIG_PATH...");
         let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
+        println!("[DEBUG Config::load] CONFIG_PATH = {}", config_path);
         let config_path = PathBuf::from(&config_path);
 
+        println!("[DEBUG Config::load] Reading config file...");
         let yaml_content = std::fs::read_to_string(&config_path)
             .map_err(|e| ConfigError::FileRead(config_path.clone(), e.to_string()))?;
+        println!(
+            "[DEBUG Config::load] Config file read, {} bytes",
+            yaml_content.len()
+        );
 
+        println!("[DEBUG Config::load] Parsing YAML...");
         let file: FileConfig = serde_yml::from_str(&yaml_content)
             .map_err(|e| ConfigError::Parse(config_path.clone(), e.to_string()))?;
+        println!("[DEBUG Config::load] YAML parsed successfully");
 
         // Extract config directory for resolving relative paths (e.g., guide_path)
+        println!("[DEBUG Config::load] Extracting config directory...");
         let config_dir = config_path
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
+        println!("[DEBUG Config::load] Config dir: {:?}", config_dir);
 
         // Validate vault path
+        println!(
+            "[DEBUG Config::load] Validating vault path: {}",
+            file.vault_path
+        );
         let vault_path = PathBuf::from(&file.vault_path);
+        println!("[DEBUG Config::load] Checking if vault exists...");
         if !vault_path.exists() {
             return Err(ConfigError::InvalidPath(vault_path));
         }
+        println!("[DEBUG Config::load] Vault path exists");
 
         // Validate git path when sync is enabled
+        println!("[DEBUG Config::load] Validating git config...");
         let git_path = file.git.path.map(PathBuf::from);
         if file.git.sync_enabled && git_path.is_none() {
             return Err(ConfigError::MissingSetting(
                 "git.path (required when git.sync_enabled is true)",
             ));
         }
+        println!("[DEBUG Config::load] Git config valid");
 
         let git_ssh_key_path = file.git.ssh_key_path.map(PathBuf::from);
 
         // Set timezone for chrono::Local
+        println!("[DEBUG Config::load] Setting TZ to: {}", file.timezone);
         env::set_var("TZ", &file.timezone);
+        println!("[DEBUG Config::load] TZ set");
 
         // Set log level so tracing picks it up
+        println!("[DEBUG Config::load] Setting RUST_LOG...");
         if env::var("RUST_LOG").is_err() {
             env::set_var("RUST_LOG", &file.log_level);
         }
+        println!("[DEBUG Config::load] RUST_LOG set");
 
         // Resolve guide_path relative to config directory if relative
+        println!("[DEBUG Config::load] Resolving guide_path...");
         let guide_path = file.guide_path.map(|p| {
             if p.is_absolute() {
                 p
@@ -240,7 +269,9 @@ impl Config {
                 config_dir.join(p)
             }
         });
+        println!("[DEBUG Config::load] Guide path resolved: {:?}", guide_path);
 
+        println!("[DEBUG Config::load] Building Config struct...");
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
