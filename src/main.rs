@@ -46,17 +46,22 @@ async fn main() {
 
     // Load .env file for API keys
     let _ = dotenvy::dotenv();
+    println!("[DEBUG] Loaded .env");
 
     // Load configuration from YAML file + env secrets
     // Done before tracing init so log_level from config is available
     let config = match Config::load() {
-        Ok(c) => Arc::new(c),
+        Ok(c) => {
+            println!("[DEBUG] Config loaded successfully");
+            Arc::new(c)
+        }
         Err(e) => {
             eprintln!("Failed to load configuration: {e}");
             std::process::exit(1);
         }
     };
 
+    println!("[DEBUG] Initializing tracing...");
     // Initialize tracing (RUST_LOG set by Config::load from config.yaml)
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -66,8 +71,10 @@ async fn main() {
         .with_target(true)
         .with_thread_ids(false)
         .init();
+    println!("[DEBUG] Tracing initialized");
 
     info!("Starting Obsidian AI Agent V{}...", VERSION);
+    println!("[DEBUG] Creating AI clients...");
 
     // Initialize OpenRouter client (for classification)
     let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
@@ -90,7 +97,9 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    println!("[DEBUG] AI clients created");
 
+    println!("[DEBUG] Initializing vault manager...");
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
     let vault = Arc::new(
         DailyNoteManager::new(
@@ -99,12 +108,15 @@ async fn main() {
         )
         .await,
     );
+    println!("[DEBUG] Vault manager initialized");
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
+    println!("[DEBUG] Telegram bot created");
 
     // Send startup notification to admin (if configured)
     if let Some(admin_chat_id) = config.admin_chat_id {
+        println!("[DEBUG] Sending startup notification to admin...");
         let startup_msg = format!("Started agent V{}", VERSION);
         match bot.send_message(ChatId(admin_chat_id), &startup_msg).await {
             Ok(_) => info!(chat_id = admin_chat_id, "Startup notification sent"),
@@ -112,6 +124,7 @@ async fn main() {
                 warn!(error = %e, chat_id = admin_chat_id, "Failed to send startup notification")
             }
         }
+        println!("[DEBUG] Startup notification handled");
     }
 
     // Initialize conflict resolver
@@ -124,6 +137,7 @@ async fn main() {
     // Pending transcript requests for inline callback workflow
     let transcript_pending: TranscriptPending = Arc::new(Mutex::new(HashMap::new()));
 
+    println!("[DEBUG] Initializing git sync...");
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
         let git_path = config
@@ -148,6 +162,7 @@ async fn main() {
         info!("Git sync disabled (GIT_SYNC_ENABLED=false)");
         None
     };
+    println!("[DEBUG] Git sync initialized");
 
     // Create shared handler context
     let handler_ctx = HandlerContext::new(
@@ -169,6 +184,7 @@ async fn main() {
         "Bot configured"
     );
 
+    println!("[DEBUG] Building dispatcher...");
     // Build dispatcher
     let handler = schema();
 
