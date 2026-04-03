@@ -42,19 +42,28 @@ fn into_handler_error(e: AppError) -> Box<dyn std::error::Error + Send + Sync> {
 
 #[tokio::main]
 async fn main() {
+    eprintln!("[DEBUG] main() starting...");
+    
     // Load .env file for API keys
+    eprintln!("[DEBUG] Loading .env file...");
     let _ = dotenvy::dotenv();
+    eprintln!("[DEBUG] .env loaded");
 
     // Load configuration from YAML file + env secrets
     // Done before tracing init so log_level from config is available
+    eprintln!("[DEBUG] About to load Config...");
     let config = match Config::load() {
-        Ok(c) => Arc::new(c),
+        Ok(c) => {
+            eprintln!("[DEBUG] Config loaded successfully");
+            Arc::new(c)
+        }
         Err(e) => {
             eprintln!("Failed to load configuration: {e}");
             std::process::exit(1);
         }
     };
 
+    eprintln!("[DEBUG] Initializing tracing subscriber...");
     // Initialize tracing (RUST_LOG set by Config::load from config.yaml)
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -64,12 +73,18 @@ async fn main() {
         .with_target(true)
         .with_thread_ids(false)
         .init();
+    eprintln!("[DEBUG] Tracing initialized");
 
     info!("Starting Obsidian AI Agent V{}...", VERSION);
+    eprintln!("[DEBUG] Starting Obsidian AI Agent V{}...", VERSION);
 
     // Initialize OpenRouter client (for classification)
+    eprintln!("[DEBUG] Creating OpenRouter client...");
     let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
-        Ok(c) => Arc::new(c),
+        Ok(c) => {
+            eprintln!("[DEBUG] OpenRouter client created");
+            Arc::new(c)
+        }
         Err(e) => {
             error!(error = %e, "Failed to create OpenRouter client");
             std::process::exit(1);
@@ -77,12 +92,16 @@ async fn main() {
     };
 
     // Initialize Whisper client (for voice transcription)
+    eprintln!("[DEBUG] Creating Whisper client...");
     let whisper_client = match WhisperClient::new(
         config.openai_api_key.clone(),
         config.whisper_model.clone(),
         config.whisper_language.clone(),
     ) {
-        Ok(c) => Arc::new(c),
+        Ok(c) => {
+            eprintln!("[DEBUG] Whisper client created");
+            Arc::new(c)
+        }
         Err(e) => {
             error!(error = %e, "Failed to create Whisper client");
             std::process::exit(1);
@@ -90,6 +109,7 @@ async fn main() {
     };
 
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
+    eprintln!("[DEBUG] Creating DailyNoteManager...");
     let vault = Arc::new(
         DailyNoteManager::new(
             config.vault_path.clone(),
@@ -97,43 +117,64 @@ async fn main() {
         )
         .await,
     );
+    eprintln!("[DEBUG] DailyNoteManager created");
 
     // Initialize Telegram bot
+    eprintln!("[DEBUG] Creating Telegram bot...");
     let bot = Bot::new(&config.teloxide_token);
+    eprintln!("[DEBUG] Telegram bot created");
 
     // Send startup notification to admin (if configured)
+    eprintln!("[DEBUG] Checking admin_chat_id for notification...");
     if let Some(admin_chat_id) = config.admin_chat_id {
+        eprintln!("[DEBUG] Sending startup notification to {}", admin_chat_id);
         let startup_msg = format!("Started agent V{}", VERSION);
         match bot.send_message(ChatId(admin_chat_id), &startup_msg).await {
-            Ok(_) => info!(chat_id = admin_chat_id, "Startup notification sent"),
+            Ok(_) => {
+                eprintln!("[DEBUG] Startup notification sent");
+                info!(chat_id = admin_chat_id, "Startup notification sent");
+            }
             Err(e) => {
+                eprintln!("[DEBUG] Failed to send startup notification: {}", e);
                 warn!(error = %e, chat_id = admin_chat_id, "Failed to send startup notification")
             }
         }
+    } else {
+        eprintln!("[DEBUG] No admin_chat_id configured");
     }
 
     // Initialize conflict resolver
+    eprintln!("[DEBUG] Creating conflict resolver...");
     let conflict_resolver = conflict::ConflictResolver::new(bot.clone());
     let conflict_pending = conflict_resolver.pending_map();
+    eprintln!("[DEBUG] Conflict resolver created");
 
     // Initialize chat_id tracker
+    eprintln!("[DEBUG] Creating chat tracker...");
     let chat_tracker = chat_tracker::ChatIdTracker::new();
+    eprintln!("[DEBUG] Chat tracker created");
 
     // Pending transcript requests for inline callback workflow
+    eprintln!("[DEBUG] Creating transcript_pending map...");
     let transcript_pending: TranscriptPending = Arc::new(Mutex::new(HashMap::new()));
+    eprintln!("[DEBUG] transcript_pending created");
 
     // Initialize git sync with debouncing (if enabled)
+    eprintln!("[DEBUG] Checking git sync config, enabled={}", config.git_sync_enabled);
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
+        eprintln!("[DEBUG] Git sync enabled, initializing...");
         let git_path = config
             .git_path
             .clone()
             .expect("GIT_PATH required when git sync enabled");
+        eprintln!("[DEBUG] Git path: {:?}", git_path);
         let git_sync = Arc::new(GitSync::new(
             git_path,
             config.git_remote_name.clone(),
             config.git_branch.clone(),
             config.git_ssh_key_path.clone(),
         ));
+        eprintln!("[DEBUG] GitSync created, spawning debounced sync...");
         Some(debounce::spawn_debounced_sync(
             git_sync.clone(),
             config.git_sync_debounce_secs,
@@ -144,10 +185,13 @@ async fn main() {
         ))
     } else {
         info!("Git sync disabled (GIT_SYNC_ENABLED=false)");
+        eprintln!("[DEBUG] Git sync disabled");
         None
     };
+    eprintln!("[DEBUG] Git sync setup complete");
 
     // Create shared handler context
+    eprintln!("[DEBUG] Creating HandlerContext...");
     let handler_ctx = HandlerContext::new(
         config.clone(),
         ai_client.clone(),
@@ -155,6 +199,7 @@ async fn main() {
         sync_notifier.clone(),
         chat_tracker.clone(),
     );
+    eprintln!("[DEBUG] HandlerContext created");
 
     info!(
         vault_path = %config.vault_path.display(),
@@ -166,9 +211,11 @@ async fn main() {
         allowed_users = ?config.allowed_user_ids,
         "Bot configured"
     );
+    eprintln!("[DEBUG] Bot configured, building dispatcher...");
 
     // Build dispatcher
     let handler = schema();
+    eprintln!("[DEBUG] Schema built, creating dispatcher...");
 
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![
@@ -189,6 +236,8 @@ async fn main() {
         .build()
         .dispatch()
         .await;
+    
+    eprintln!("[DEBUG] Dispatcher finished");
 }
 
 fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
