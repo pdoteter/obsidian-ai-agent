@@ -311,11 +311,14 @@ impl DailyNoteManager {
     pub async fn ensure_today(&self) -> Result<PathBuf, VaultError> {
         let path = self.today_path();
 
-        // Ensure the daily notes directory exists
-        let daily_dir = self.daily_notes_dir();
-        if !daily_dir.exists() {
-            fs::create_dir_all(&daily_dir).await?;
-            info!(dir = %daily_dir.display(), "Created daily notes directory");
+        // Ensure the full parent directory for today's note exists.
+        // The configured date format can include path separators like YYYY/MM/YYYY-MM-DD,
+        // which means the resolved note path may be nested deeper than the configured folder.
+        if let Some(parent_dir) = path.parent() {
+            if !parent_dir.exists() {
+                fs::create_dir_all(parent_dir).await?;
+                info!(dir = %parent_dir.display(), "Created daily note parent directory");
+            }
         }
 
         // Create file from template if it doesn't exist
@@ -849,5 +852,35 @@ mod tests {
         let updated = fs::read_to_string(&note_path).await.unwrap();
         assert!(updated.contains("2026-03-24")); // Original date preserved
         assert!(!updated.contains("9999-01-01")); // Protected key not updated
+    }
+
+    #[tokio::test]
+    async fn test_ensure_today_creates_nested_parent_directories_from_format() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings {
+                folder: "Daily Notes".to_string(),
+                format: "YYYY/MM/YYYY-MM-DD".to_string(),
+                template: String::new(),
+                autorun: false,
+            },
+            date_display_format: "%Y-%m-%d".to_string(),
+        };
+
+        let note_path = manager.ensure_today().await.unwrap();
+
+        assert!(note_path.exists());
+        assert!(note_path.parent().unwrap().exists());
+        assert!(note_path.starts_with(vault_path.join("Daily Notes")));
+
+        let expected_path = vault_path.join("Daily Notes").join(
+            Local::now()
+                .format("%Y/%m/%Y-%m-%d.md")
+                .to_string(),
+        );
+        assert_eq!(note_path, expected_path);
     }
 }
