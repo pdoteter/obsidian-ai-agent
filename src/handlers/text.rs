@@ -3,6 +3,7 @@ use teloxide::prelude::*;
 use teloxide::types::ChatAction;
 use tracing::{error, info};
 
+use crate::ai::classify::{ClassifiedNote, NoteCategory};
 use crate::ai::client::OpenRouterClient;
 use crate::config::Config;
 use crate::git::chat_tracker::ChatIdTracker;
@@ -104,33 +105,79 @@ pub async fn handle_text_message(
         notifier.notify();
     }
 
-    // Send confirmation
-    let tags_display = if classified.tags.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\nTags: {}",
-            classified.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ")
-        )
-    };
+    let confirmation = build_confirmation_message(&classified);
 
-    bot.send_message(
-        msg.chat.id,
-        format!(
-            "✅ {} saved as **{}**\n_{}_{}",
-            match classified.category {
-                crate::ai::classify::NoteCategory::Todo => "📌",
-                crate::ai::classify::NoteCategory::Log => "📋",
-                crate::ai::classify::NoteCategory::Note => "📝",
-            },
-            classified.category,
-            classified.summary,
-            tags_display,
-        ),
-    )
-    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-    .await
-    .ok(); // Don't fail on formatting issues
+    if let Err(error) = bot.send_message(msg.chat.id, confirmation).await {
+        error!(error = %error, "Failed to send text confirmation");
+    }
 
     Ok(())
+}
+
+fn build_confirmation_message(classified: &ClassifiedNote) -> String {
+    match classified.category {
+        NoteCategory::Log => "👍".to_string(),
+        NoteCategory::Todo | NoteCategory::Note => {
+            let tags_display = if classified.tags.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\nTags: {}",
+                    classified
+                        .tags
+                        .iter()
+                        .map(|tag| format!("#{}", tag))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+            };
+
+            format!(
+                "✅ {} saved as {}\n{}{}",
+                match classified.category {
+                    NoteCategory::Todo => "📌",
+                    NoteCategory::Note => "📝",
+                    NoteCategory::Log => unreachable!("log confirmations use thumbs up"),
+                },
+                classified.category,
+                classified.summary,
+                tags_display,
+            )
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_confirmation_message;
+    use crate::ai::classify::{ClassifiedNote, NoteCategory};
+
+    #[test]
+    fn log_confirmation_is_plain_thumbs_up() {
+        let classified = ClassifiedNote {
+            category: NoteCategory::Log,
+            markdown: "- Weight logged".to_string(),
+            tags: vec!["health".to_string()],
+            summary: "Weight logged".to_string(),
+            frontmatter: None,
+        };
+
+        assert_eq!(build_confirmation_message(&classified), "👍");
+    }
+
+    #[test]
+    fn todo_confirmation_keeps_summary_and_tags() {
+        let classified = ClassifiedNote {
+            category: NoteCategory::Todo,
+            markdown: "- [ ] Buy milk".to_string(),
+            tags: vec!["shopping".to_string(), "home".to_string()],
+            summary: "Buy milk".to_string(),
+            frontmatter: None,
+        };
+
+        assert_eq!(
+            build_confirmation_message(&classified),
+            "✅ 📌 saved as todo\nBuy milk\nTags: #shopping #home"
+        );
+    }
 }
