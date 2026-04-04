@@ -7,6 +7,7 @@ use tracing::{error, info, warn};
 use crate::error::GitError;
 
 /// Manages git operations for the Obsidian vault using system git CLI
+#[derive(Debug)]
 pub struct GitSync {
     repo_path: PathBuf,
     remote_name: String,
@@ -357,6 +358,38 @@ impl GitSync {
         }
     }
 
+    /// Best-effort remote pull before a new daily-note write.
+    ///
+    /// This only rebases when the worktree is clean, so pending local changes are never
+    /// mixed with a pre-write pull.
+    pub fn pull_if_clean(&self) -> Result<PreWriteSyncResult, GitError> {
+        if self.has_changes()? {
+            info!("Skipping pre-write git pull because local changes are present");
+            return Ok(PreWriteSyncResult::SkippedLocalChanges);
+        }
+
+        match self.fetch() {
+            Ok(()) => {}
+            Err(error) => {
+                warn!(error = %error, "Pre-write git fetch failed, continuing without pull");
+                return Ok(PreWriteSyncResult::SkippedFetchFailure);
+            }
+        }
+
+        if self.needs_rebase()? {
+            info!("Remote has new commits before write, rebasing local branch");
+            return match self.rebase()? {
+                RebaseResult::Success => Ok(PreWriteSyncResult::Rebased),
+                RebaseResult::Conflict(info) => {
+                    warn!(files = ?info.files, "Pre-write git pull hit conflicts, continuing without applying remote changes");
+                    Ok(PreWriteSyncResult::SkippedConflict)
+                }
+            };
+        }
+
+        Ok(PreWriteSyncResult::AlreadyUpToDate)
+    }
+
     /// Get list of conflicted files (for conflict resolution UI)
     pub fn get_conflicted_files(&self) -> Result<Vec<String>, GitError> {
         let output = self.run_git(&["diff", "--name-only", "--diff-filter=U"])?;
@@ -445,6 +478,33 @@ impl std::fmt::Display for SyncResult {
             SyncResult::RebasedAndPushed => write!(f, "Rebased and pushed"),
             SyncResult::ConflictDetected(ref info) => {
                 write!(f, "Conflict detected in {} file(s)", info.files.len())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreWriteSyncResult {
+    AlreadyUpToDate,
+    Rebased,
+    SkippedLocalChanges,
+    SkippedFetchFailure,
+    SkippedConflict,
+}
+
+impl std::fmt::Display for PreWriteSyncResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PreWriteSyncResult::AlreadyUpToDate => write!(f, "Already up to date"),
+            PreWriteSyncResult::Rebased => write!(f, "Pulled remote changes before write"),
+            PreWriteSyncResult::SkippedLocalChanges => {
+                write!(f, "Skipped pre-write pull because local changes exist")
+            }
+            PreWriteSyncResult::SkippedFetchFailure => {
+                write!(f, "Skipped pre-write pull because fetch failed")
+            }
+            PreWriteSyncResult::SkippedConflict => {
+                write!(f, "Skipped pre-write pull because rebase conflicted")
             }
         }
     }

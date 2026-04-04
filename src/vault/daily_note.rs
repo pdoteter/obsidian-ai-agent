@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::{debug, info, warn};
 
+use crate::git::debounce::SyncNotifier;
 use crate::error::VaultError;
 
 const DEFAULT_DAILY_NOTE_FORMAT: &str = "YYYY-MM-DD";
@@ -229,6 +230,7 @@ pub struct DailyNoteManager {
     settings: DailyNoteSettings,
     /// Chrono strftime format for {{date}}/{{title}} in templates
     date_display_format: String,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl DailyNoteManager {
@@ -237,12 +239,35 @@ impl DailyNoteManager {
     ///
     /// `date_display_format` is a chrono strftime string used for `{{date}}`/`{{title}}`
     /// in daily note templates.
-    pub async fn new(vault_path: PathBuf, date_display_format: String) -> Self {
+    pub async fn new(
+        vault_path: PathBuf,
+        date_display_format: String,
+        sync_notifier: Option<SyncNotifier>,
+    ) -> Self {
         let settings = DailyNoteSettings::load_from_vault(&vault_path).await;
         Self {
             vault_path,
             settings,
             date_display_format,
+            sync_notifier,
+        }
+    }
+
+    async fn sync_before_write_if_idle(&self) {
+        let Some(sync_notifier) = self.sync_notifier.as_ref() else {
+            return;
+        };
+
+        match sync_notifier.pull_if_idle().await {
+            Ok(Some(result)) => {
+                info!(result = %result, "Completed pre-write git pull");
+            }
+            Ok(None) => {
+                debug!("Skipping pre-write git pull because debounce worker is busy");
+            }
+            Err(error) => {
+                warn!(error = %error, "Pre-write git pull failed, continuing with local write");
+            }
         }
     }
 
@@ -309,6 +334,8 @@ impl DailyNoteManager {
     /// Ensure today's daily note exists. Creates it from template if not.
     /// Returns the path to the daily note.
     pub async fn ensure_today(&self) -> Result<PathBuf, VaultError> {
+        self.sync_before_write_if_idle().await;
+
         let path = self.today_path();
 
         // Ensure the full parent directory for today's note exists.
@@ -781,6 +808,7 @@ mod tests {
             vault_path: vault_path.clone(),
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
         };
 
         let mut fields = HashMap::new();
@@ -811,6 +839,7 @@ mod tests {
             vault_path: vault_path.clone(),
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
         };
 
         let fields = HashMap::new();
@@ -841,6 +870,7 @@ mod tests {
             vault_path: vault_path.clone(),
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
         };
 
         let mut fields = HashMap::new();
@@ -868,6 +898,7 @@ mod tests {
                 autorun: false,
             },
             date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
         };
 
         let note_path = manager.ensure_today().await.unwrap();

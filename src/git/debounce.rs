@@ -1,10 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use teloxide::prelude::Requester;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
+use crate::error::GitError;
 use super::chat_tracker::ChatIdTracker;
 use super::conflict::ConflictResolver;
 use super::sync::{GitSync, SyncResult};
@@ -16,12 +17,50 @@ use crate::config::Config;
 #[derive(Debug, Clone)]
 pub struct SyncNotifier {
     tx: mpsc::UnboundedSender<()>,
+    git_sync: Arc<GitSync>,
+    debounce_pending: Arc<AtomicBool>,
+    sync_running: Arc<AtomicBool>,
+    resolving: Arc<AtomicBool>,
+    git_lock: Arc<Mutex<()>>,
 }
 
 impl SyncNotifier {
     /// Notify that the vault has changed and should be synced
     pub fn notify(&self) {
         let _ = self.tx.send(());
+    }
+
+    pub fn is_busy(&self) -> bool {
+        self.debounce_pending.load(Ordering::SeqCst)
+            || self.sync_running.load(Ordering::SeqCst)
+            || self.resolving.load(Ordering::SeqCst)
+    }
+
+    pub async fn pull_if_idle(&self) -> Result<Option<super::sync::PreWriteSyncResult>, GitError> {
+        if self.is_busy() {
+            return Ok(None);
+        }
+
+        let Ok(_git_guard) = self.git_lock.try_lock() else {
+            return Ok(None);
+        };
+
+        let git_sync = self.git_sync.clone();
+        let sync_running = self.sync_running.clone();
+
+        sync_running.store(true, Ordering::SeqCst);
+
+        let result = tokio::task::spawn_blocking(move || git_sync.pull_if_clean()).await;
+
+        sync_running.store(false, Ordering::SeqCst);
+
+        match result {
+            Ok(inner) => inner.map(Some),
+            Err(error) => Err(GitError::CommandFailed {
+                command: "pre_write_pull".to_string(),
+                message: format!("spawn_blocking failed: {}", error),
+            }),
+        }
     }
 }
 
@@ -39,9 +78,21 @@ pub fn spawn_debounced_sync(
     chat_tracker: ChatIdTracker,
 ) -> SyncNotifier {
     let (tx, mut rx) = mpsc::unbounded_channel::<()>();
-    
+
     // Guard to prevent nested conflict resolution
     let resolving = Arc::new(AtomicBool::new(false));
+    let debounce_pending = Arc::new(AtomicBool::new(false));
+    let sync_running = Arc::new(AtomicBool::new(false));
+    let git_lock = Arc::new(Mutex::new(()));
+
+    let notifier = SyncNotifier {
+        tx,
+        git_sync: git_sync.clone(),
+        debounce_pending: debounce_pending.clone(),
+        sync_running: sync_running.clone(),
+        resolving: resolving.clone(),
+        git_lock: git_lock.clone(),
+    };
 
     tokio::spawn(async move {
         let debounce_duration = Duration::from_secs(debounce_secs);
@@ -53,6 +104,7 @@ pub fn spawn_debounced_sync(
                 match rx.recv().await {
                     Some(()) => {
                         pending = true;
+                        debounce_pending.store(true, Ordering::SeqCst);
                         info!("Vault change detected, starting debounce timer");
                     }
                     None => {
@@ -92,6 +144,7 @@ pub fn spawn_debounced_sync(
                 // Debounce period expired — perform sync
                 info!("Debounce period expired, performing git sync");
                 pending = false;
+                debounce_pending.store(false, Ordering::SeqCst);
 
                 // Check if already resolving a conflict
                 if resolving.load(Ordering::SeqCst) {
@@ -101,7 +154,10 @@ pub fn spawn_debounced_sync(
 
                 // Run git sync in a blocking task (git2 is not async)
                 let git = git_sync.clone();
+                let _git_guard = git_lock.lock().await;
+                sync_running.store(true, Ordering::SeqCst);
                 let result = tokio::task::spawn_blocking(move || git.full_sync()).await;
+                sync_running.store(false, Ordering::SeqCst);
 
                 match result {
                     Ok(Ok(sync_result)) => {
@@ -240,5 +296,5 @@ pub fn spawn_debounced_sync(
         }
     });
 
-    SyncNotifier { tx }
+    notifier
 }

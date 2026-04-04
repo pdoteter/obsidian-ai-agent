@@ -77,9 +77,6 @@ async fn main() {
         }
     };
 
-    // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
-    let vault = Arc::new(DailyNoteManager::new(config.vault_path.clone(), config.date_display_format.clone()).await);
-
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
 
@@ -114,6 +111,16 @@ async fn main() {
         info!("Git sync disabled (GIT_SYNC_ENABLED=false)");
         None
     };
+
+    // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
+    let vault = Arc::new(
+        DailyNoteManager::new(
+            config.vault_path.clone(),
+            config.date_display_format.clone(),
+            sync_notifier.clone(),
+        )
+        .await,
+    );
 
     info!(
         vault_path = %config.vault_path.display(),
