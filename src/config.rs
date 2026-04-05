@@ -37,6 +37,9 @@ struct FileConfig {
 
     #[serde(default)]
     url: UrlConfig,
+
+    #[serde(default)]
+    ack: AckConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +175,7 @@ pub struct Config {
     pub guide_path: Option<PathBuf>,
     pub image: ImageConfig,
     pub url: UrlConfig,
+    pub ack: AckConfig,
 }
 
 impl Config {
@@ -256,6 +260,7 @@ impl Config {
             guide_path,
             image: file.image,
             url: file.url,
+            ack: file.ack,
         })
     }
 
@@ -304,6 +309,32 @@ impl Default for UrlConfig {
     }
 }
 
+/// Telegram acknowledgement settings
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AckConfig {
+    pub log_mode: LogAckMode,
+    pub log_text: String,
+    pub reaction_emoji: String,
+}
+
+impl Default for AckConfig {
+    fn default() -> Self {
+        Self {
+            log_mode: LogAckMode::Reaction,
+            log_text: "Done 👍".to_string(),
+            reaction_emoji: "👍".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LogAckMode {
+    Reaction,
+    Text,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +360,27 @@ mod tests {
         assert_eq!(file_config.url.fetch_timeout_secs, 30);
         assert_eq!(file_config.url.max_content_bytes, 1048576);
         assert_eq!(file_config.url.max_urls_per_message, 10);
+    }
+
+    #[test]
+    fn test_ack_config_defaults() {
+        let file_config: FileConfig = serde_yml::from_str("vault_path: /tmp/vault\n").unwrap();
+
+        assert_eq!(file_config.ack.log_mode, LogAckMode::Reaction);
+        assert_eq!(file_config.ack.log_text, "Done 👍");
+        assert_eq!(file_config.ack.reaction_emoji, "👍");
+    }
+
+    #[test]
+    fn test_custom_ack_config() {
+        let file_config: FileConfig = serde_yml::from_str(
+            "vault_path: /tmp/vault\nack:\n  log_mode: text\n  log_text: Logged 👍\n  reaction_emoji: ✅\n",
+        )
+        .unwrap();
+
+        assert_eq!(file_config.ack.log_mode, LogAckMode::Text);
+        assert_eq!(file_config.ack.log_text, "Logged 👍");
+        assert_eq!(file_config.ack.reaction_emoji, "✅");
     }
 
     #[test]

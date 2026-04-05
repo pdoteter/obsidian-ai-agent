@@ -40,6 +40,12 @@ url:
   max_content_bytes: 524288              # default: 524288 (512KB)
   max_urls_per_message: 5                # default: 5
 
+# Telegram acknowledgement settings (optional — defaults shown)
+# ack:
+#   log_mode: reaction                    # reaction | text (default: reaction)
+#   log_text: "Done 👍"                   # used when log_mode=text or reaction fallback triggers
+#   reaction_emoji: "👍"                  # emoji used for message reaction
+
 # Timezone for timestamps in daily notes (IANA format)
 timezone: Europe/Brussels
 

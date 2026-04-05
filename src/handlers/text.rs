@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::types::ChatAction;
+use teloxide::types::{ChatAction, ReactionType};
 use tracing::{error, info};
 
 use crate::ai::classify::{ClassifiedNote, NoteCategory};
 use crate::ai::client::OpenRouterClient;
-use crate::config::Config;
+use crate::config::{Config, LogAckMode};
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::handlers::url::TranscriptPending;
@@ -105,9 +105,7 @@ pub async fn handle_text_message(
         notifier.notify();
     }
 
-    let confirmation = build_confirmation_message(&classified);
-
-    if let Err(error) = bot.send_message(msg.chat.id, confirmation).await {
+    if let Err(error) = send_confirmation(&bot, &msg, &config, &classified).await {
         error!(error = %error, "Failed to send text confirmation");
     }
 
@@ -147,10 +145,59 @@ fn build_confirmation_message(classified: &ClassifiedNote) -> String {
     }
 }
 
+async fn send_confirmation(
+    bot: &Bot,
+    msg: &Message,
+    config: &Config,
+    classified: &ClassifiedNote,
+) -> Result<(), teloxide::RequestError> {
+    match classified.category {
+        NoteCategory::Log => send_log_acknowledgement(bot, msg, config).await,
+        NoteCategory::Todo | NoteCategory::Note => {
+            let confirmation = build_confirmation_message(classified);
+            bot.send_message(msg.chat.id, confirmation).await.map(|_| ())
+        }
+    }
+}
+
+async fn send_log_acknowledgement(
+    bot: &Bot,
+    msg: &Message,
+    config: &Config,
+) -> Result<(), teloxide::RequestError> {
+    match config.ack.log_mode {
+        LogAckMode::Reaction => {
+            let reaction_result = bot
+                .set_message_reaction(msg.chat.id, msg.id)
+                .reaction(vec![ReactionType::Emoji {
+                    emoji: config.ack.reaction_emoji.clone(),
+                }])
+                .is_big(false)
+                .send()
+                .await;
+
+            match reaction_result {
+                Ok(_) => Ok(()),
+                Err(error) => {
+                    error!(error = %error, "Failed to set log reaction, falling back to text acknowledgement");
+                    bot.send_message(msg.chat.id, config.ack.log_text.clone())
+                        .await
+                        .map(|_| ())
+                }
+            }
+        }
+        LogAckMode::Text => bot
+            .send_message(msg.chat.id, config.ack.log_text.clone())
+            .await
+            .map(|_| ()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::build_confirmation_message;
     use crate::ai::classify::{ClassifiedNote, NoteCategory};
+    use crate::config::{AckConfig, LogAckMode};
 
     #[test]
     fn log_confirmation_is_plain_thumbs_up() {
@@ -179,5 +226,14 @@ mod tests {
             build_confirmation_message(&classified),
             "✅ 📌 saved as todo\nBuy milk\nTags: #shopping #home"
         );
+    }
+
+    #[test]
+    fn log_ack_config_defaults_to_small_reaction_mode() {
+        let ack = AckConfig::default();
+
+        assert_eq!(ack.log_mode, LogAckMode::Reaction);
+        assert_eq!(ack.log_text, "Done 👍");
+        assert_eq!(ack.reaction_emoji, "👍");
     }
 }
