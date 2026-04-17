@@ -1,10 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
-use tracing::info;
+use std::time::Duration;
+use tokio::time::sleep;
+use tracing::{info, warn};
 
 use super::client::OpenRouterClient;
 use crate::error::AiError;
+
+/// Maximum retries for JSON parse failures (truncated responses)
+const MAX_PARSE_RETRIES: u32 = 2;
 
 /// The category assigned to a piece of text by the AI
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -104,15 +109,160 @@ impl OpenRouterClient {
         &self,
         body: serde_json::Value,
     ) -> Result<ClassifiedNote, AiError> {
-        let response = self.chat_completion(body).await?;
-        let content = Self::extract_content(&response)?;
+        let mut backoff = Duration::from_millis(500);
+        let mut last_content = String::new();
+        let mut last_error: Option<serde_json::Error> = None;
 
-        serde_json::from_str(&content).map_err(|e| {
-            AiError::ClassificationFailed(format!(
-                "Failed to parse classification JSON: {}. Raw: {}",
-                e, content
-            ))
+        for attempt in 0..=MAX_PARSE_RETRIES {
+            let response = self.chat_completion(body.clone()).await?;
+            let content = Self::extract_content(&response)?;
+            last_content = content.clone();
+
+            match serde_json::from_str::<ClassifiedNote>(&content) {
+                Ok(classified) => return Ok(classified),
+                Err(e) => {
+                    last_error = Some(e);
+
+                    // Check if this looks like a truncated response
+                    if is_truncated_json(&content) && attempt < MAX_PARSE_RETRIES {
+                        warn!(
+                            attempt = attempt + 1,
+                            content_len = content.len(),
+                            content_preview = truncate_for_log(&content, 100),
+                            "Truncated JSON response, retrying"
+                        );
+                        sleep(backoff).await;
+                        backoff *= 2;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // All retries failed - try fallback extraction
+        if let Some(fallback) = try_extract_partial_classification(&last_content) {
+            warn!(
+                content_preview = truncate_for_log(&last_content, 200),
+                "Used fallback extraction for partial JSON"
+            );
+            return Ok(fallback);
+        }
+
+        // Complete failure
+        Err(AiError::ClassificationFailed(format!(
+            "Failed to parse classification JSON after {} retries: {}. Raw: {}",
+            MAX_PARSE_RETRIES + 1,
+            last_error.map(|e| e.to_string()).unwrap_or_default(),
+            truncate_for_log(&last_content, 500)
+        )))
+    }
+}
+
+/// Check if a JSON string appears to be truncated/incomplete
+fn is_truncated_json(content: &str) -> bool {
+    let trimmed = content.trim();
+
+    // Empty or very short response
+    if trimmed.len() < 10 {
+        return true;
+    }
+
+    // Doesn't end with closing brace (for JSON objects)
+    if !trimmed.ends_with('}') {
+        return true;
+    }
+
+    // Count braces - unbalanced means truncated
+    let open_braces = trimmed.chars().filter(|&c| c == '{').count();
+    let close_braces = trimmed.chars().filter(|&c| c == '}').count();
+    if open_braces != close_braces {
+        return true;
+    }
+
+    // Check for obvious truncation patterns
+    if trimmed.ends_with(':') || trimmed.ends_with(',') || trimmed.ends_with('"') {
+        return true;
+    }
+
+    false
+}
+
+/// Try to extract a partial classification from incomplete JSON using regex
+fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
+    use regex::Regex;
+
+    // Try to extract category (required)
+    let category_re = Regex::new(r#""category"\s*:\s*"(todo|log|note)""#).ok()?;
+    let category_match = category_re.captures(content)?;
+    let category_str = category_match.get(1)?.as_str();
+
+    let category = match category_str {
+        "todo" => NoteCategory::Todo,
+        "log" => NoteCategory::Log,
+        "note" => NoteCategory::Note,
+        _ => return None,
+    };
+
+    // Try to extract markdown (required for useful output)
+    let markdown_re = Regex::new(r#""markdown"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).ok()?;
+    let markdown = markdown_re
+        .captures(content)
+        .and_then(|c| c.get(1))
+        .map(|m| unescape_json_string(m.as_str()))
+        .unwrap_or_else(|| "[Content extraction failed]".to_string());
+
+    // Try to extract summary
+    let summary_re = Regex::new(r#""summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).ok()?;
+    let summary = summary_re
+        .captures(content)
+        .and_then(|c| c.get(1))
+        .map(|m| unescape_json_string(m.as_str()))
+        .unwrap_or_else(|| "Extracted from partial response".to_string());
+
+    // Try to extract tags (optional)
+    let tags_re = Regex::new(r#""tags"\s*:\s*\[([^\]]*)\]"#).ok()?;
+    let tags = tags_re
+        .captures(content)
+        .and_then(|c| c.get(1))
+        .and_then(|m| {
+            let tag_item_re = Regex::new(r#""([^"]+)""#).ok()?;
+            Some(
+                tag_item_re
+                    .captures_iter(m.as_str())
+                    .filter_map(|c| c.get(1).map(|t| t.as_str().to_string()))
+                    .collect::<Vec<_>>(),
+            )
         })
+        .unwrap_or_default();
+
+    Some(ClassifiedNote {
+        category,
+        markdown,
+        tags,
+        summary,
+        frontmatter: None, // Cannot reliably extract complex nested structure
+    })
+}
+
+/// Unescape basic JSON string escapes
+fn unescape_json_string(s: &str) -> String {
+    s.replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+}
+
+/// Truncate content for logging to avoid huge log entries
+fn truncate_for_log(content: &str, max_len: usize) -> String {
+    if content.len() <= max_len {
+        content.to_string()
+    } else {
+        format!(
+            "{}...[truncated, {} total bytes]",
+            &content[..max_len],
+            content.len()
+        )
     }
 }
 
@@ -433,5 +583,91 @@ mod tests {
             "system prompt",
         );
         assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
+    }
+
+    #[test]
+    fn test_is_truncated_json_empty() {
+        assert!(super::is_truncated_json(""));
+        assert!(super::is_truncated_json("   "));
+        assert!(super::is_truncated_json("{"));
+    }
+
+    #[test]
+    fn test_is_truncated_json_incomplete() {
+        // Missing closing brace
+        assert!(super::is_truncated_json(r#"{"category": "todo""#));
+        // Ends with colon (like the actual error)
+        assert!(super::is_truncated_json(r#"{ "category":"#));
+        // Ends with comma
+        assert!(super::is_truncated_json(r#"{"category": "todo","#));
+        // Unbalanced braces
+        assert!(super::is_truncated_json(r#"{"nested": {"value": 1}"#));
+    }
+
+    #[test]
+    fn test_is_truncated_json_valid() {
+        assert!(!super::is_truncated_json(r#"{"category": "todo"}"#));
+        assert!(!super::is_truncated_json(r#"{"a": {"b": 1}}"#));
+    }
+
+    #[test]
+    fn test_try_extract_partial_classification_complete() {
+        let content = r#"{"category": "todo", "markdown": "- [ ] Buy milk", "tags": ["shopping"], "summary": "Buy milk", "frontmatter": null}"#;
+        let result = super::try_extract_partial_classification(content);
+        assert!(result.is_some());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Todo);
+        assert_eq!(note.markdown, "- [ ] Buy milk");
+        assert_eq!(note.tags, vec!["shopping"]);
+        assert_eq!(note.summary, "Buy milk");
+    }
+
+    #[test]
+    fn test_try_extract_partial_classification_truncated() {
+        // Simulates the actual error: truncated after "category":
+        let content = r#"{"category": "log", "markdown": "- Went for a run", "tags": ["health", "fitness"], "summary":"#;
+        let result = super::try_extract_partial_classification(content);
+        assert!(result.is_some());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Log);
+        assert_eq!(note.markdown, "- Went for a run");
+        assert_eq!(note.tags, vec!["health", "fitness"]);
+        // Summary uses fallback since it's truncated
+        assert_eq!(note.summary, "Extracted from partial response");
+    }
+
+    #[test]
+    fn test_try_extract_partial_classification_minimal() {
+        // Only category available
+        let content = r#"{"category": "note""#;
+        let result = super::try_extract_partial_classification(content);
+        assert!(result.is_some());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Note);
+        assert_eq!(note.markdown, "[Content extraction failed]");
+    }
+
+    #[test]
+    fn test_try_extract_partial_classification_no_category() {
+        let content = r#"{"markdown": "test"}"#;
+        let result = super::try_extract_partial_classification(content);
+        assert!(result.is_none(), "should fail without category");
+    }
+
+    #[test]
+    fn test_unescape_json_string() {
+        assert_eq!(super::unescape_json_string(r#"line1\nline2"#), "line1\nline2");
+        assert_eq!(super::unescape_json_string(r#"tab\there"#), "tab\there");
+        assert_eq!(super::unescape_json_string(r#"quote\"here"#), "quote\"here");
+        assert_eq!(super::unescape_json_string(r#"backslash\\here"#), "backslash\\here");
+    }
+
+    #[test]
+    fn test_truncate_for_log() {
+        assert_eq!(super::truncate_for_log("short", 100), "short");
+        let long = "a".repeat(200);
+        let truncated = super::truncate_for_log(&long, 50);
+        assert!(truncated.contains("...[truncated"));
+        assert!(truncated.contains("200 total bytes"));
     }
 }
