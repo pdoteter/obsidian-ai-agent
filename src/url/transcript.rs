@@ -1,6 +1,7 @@
 use crate::error::UrlError;
 use regex::Regex;
 use std::io::ErrorKind;
+use std::sync::LazyLock;
 use tempfile::TempDir;
 use tokio::process::Command;
 use tracing::{info, warn};
@@ -150,6 +151,19 @@ async fn find_and_read_vtt(
     })
 }
 
+static TIMESTAMP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}")
+        .expect("Timestamp regex is valid")
+});
+
+static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"<[^>]+>").expect("HTML tag regex is valid")
+});
+
+static SINGLE_SPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\s+").expect("Whitespace regex is valid")
+});
+
 /// Parse VTT (WebVTT) subtitle format into plain text.
 /// 
 /// Removes:
@@ -160,20 +174,13 @@ async fn find_and_read_vtt(
 /// 
 /// Joins subtitle lines with spaces to form readable paragraphs.
 fn parse_vtt(raw: &str) -> String {
-    // Regex to match timestamp lines
-    let timestamp_regex = Regex::new(r"^\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3}")
-        .expect("Timestamp regex is valid");
-
-    // Regex to strip HTML tags
-    let html_tag_regex = Regex::new(r"<[^>]+>").expect("HTML tag regex is valid");
-
     let mut text_lines = Vec::new();
 
     for line in raw.lines() {
         let trimmed = line.trim();
 
         // Skip empty lines, WEBVTT header, and timestamp lines
-        if trimmed.is_empty() || trimmed == "WEBVTT" || timestamp_regex.is_match(trimmed) {
+        if trimmed.is_empty() || trimmed == "WEBVTT" || TIMESTAMP_REGEX.is_match(trimmed) {
             continue;
         }
 
@@ -183,7 +190,7 @@ fn parse_vtt(raw: &str) -> String {
         }
 
         // Strip HTML tags
-        let cleaned = html_tag_regex.replace_all(trimmed, "");
+        let cleaned = HTML_TAG_REGEX.replace_all(trimmed, "");
         
         if !cleaned.is_empty() {
             text_lines.push(cleaned.to_string());
@@ -194,8 +201,7 @@ fn parse_vtt(raw: &str) -> String {
     let joined = text_lines.join(" ");
     
     // Collapse multiple spaces to single space
-    let single_space_regex = Regex::new(r"\s+").expect("Whitespace regex is valid");
-    single_space_regex.replace_all(&joined, " ").trim().to_string()
+    SINGLE_SPACE_REGEX.replace_all(&joined, " ").trim().to_string()
 }
 
 #[cfg(test)]
