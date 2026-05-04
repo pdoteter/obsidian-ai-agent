@@ -2,10 +2,15 @@ use crate::error::UrlError;
 use regex::Regex;
 use serde::Deserialize;
 use std::io::ErrorKind;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 use tracing::info;
+
+/// Regex to validate YouTube video ID (11 characters, alphanumeric, underscores, or hyphens)
+static VIDEO_ID_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{11}$").expect("Video ID regex is valid"));
 
 /// YouTube video metadata fetched from oEmbed API
 #[derive(Debug, Clone)]
@@ -88,9 +93,10 @@ pub async fn fetch_youtube_metadata(
     }
 
     // 6. Parse JSON response
-    let oembed: OEmbedResponse = response.json().await.map_err(|e| {
-        UrlError::ParseFailed(format!("Failed to parse oEmbed JSON: {}", e))
-    })?;
+    let oembed: OEmbedResponse = response
+        .json()
+        .await
+        .map_err(|e| UrlError::ParseFailed(format!("Failed to parse oEmbed JSON: {}", e)))?;
 
     // 7. Build YouTubeMetadata
     Ok(YouTubeMetadata {
@@ -115,6 +121,14 @@ pub async fn fetch_youtube_description(
     video_id: &str,
     timeout_secs: u64,
 ) -> Result<String, UrlError> {
+    // Security: strictly validate video_id to prevent argument injection
+    if !VIDEO_ID_REGEX.is_match(video_id) {
+        return Err(UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: "Invalid video ID format".to_string(),
+        });
+    }
+
     let url = format!("https://www.youtube.com/watch?v={}", video_id);
 
     info!(video_id, "Fetching description via yt-dlp");
@@ -157,9 +171,7 @@ pub async fn fetch_youtube_description(
     }
 
     // Parse stdout as UTF-8 and trim whitespace
-    let description = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let description = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Return error if description is empty
     if description.is_empty() {
@@ -323,6 +335,30 @@ mod tests {
         // Run with: cargo test --ignored
     }
 
+    #[tokio::test]
+    async fn test_fetch_youtube_description_invalid_id() {
+        let invalid_ids = vec![
+            "short",
+            "too_long_video_id",
+            "with spaces ",
+            "semicolon;",
+            "slash/path",
+            "back\\slash",
+            "quote'n",
+            "dash-und_12", // 12 chars
+        ];
+
+        for id in invalid_ids {
+            let result = fetch_youtube_description(id, 5).await;
+            assert!(result.is_err(), "ID '{}' should be rejected", id);
+            if let Err(UrlError::TranscriptFailed { reason, .. }) = result {
+                assert_eq!(reason, "Invalid video ID format");
+            } else {
+                panic!("Expected UrlError::TranscriptFailed for ID '{}'", id);
+            }
+        }
+    }
+
     #[test]
     fn test_fetch_youtube_description_video_id_format() {
         // Test that the command is built correctly with the video ID
@@ -336,7 +372,10 @@ mod tests {
     fn test_fetch_youtube_description_empty_string_validation() {
         // Test that an empty description would be rejected
         let empty_desc = "";
-        assert!(empty_desc.trim().is_empty(), "Empty description should fail validation");
+        assert!(
+            empty_desc.trim().is_empty(),
+            "Empty description should fail validation"
+        );
     }
 
     #[test]

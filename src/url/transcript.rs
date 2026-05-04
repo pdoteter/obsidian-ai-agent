@@ -1,9 +1,14 @@
 use crate::error::UrlError;
 use regex::Regex;
 use std::io::ErrorKind;
+use std::sync::LazyLock;
 use tempfile::TempDir;
 use tokio::process::Command;
 use tracing::{info, warn};
+
+/// Regex to validate YouTube video ID (11 characters, alphanumeric, underscores, or hyphens)
+static VIDEO_ID_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{11}$").expect("Video ID regex is valid"));
 
 /// Fetch YouTube transcript for a video using yt-dlp CLI.
 ///
@@ -19,6 +24,14 @@ use tracing::{info, warn};
 /// # Errors
 /// * `UrlError::TranscriptFailed` - yt-dlp not found, no captions available, or command failed
 pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
+    // Security: strictly validate video_id to prevent argument injection
+    if !VIDEO_ID_REGEX.is_match(video_id) {
+        return Err(UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: "Invalid video ID format".to_string(),
+        });
+    }
+
     let url = format!("https://youtube.com/watch?v={}", video_id);
 
     info!(video_id, "Fetching transcript via yt-dlp");
@@ -42,6 +55,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
             "--no-warnings",
             "-o",
             &output_template,
+            "--",
             &url,
         ])
         .output()
@@ -104,10 +118,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
 ///
 /// yt-dlp may name it `{video_id}.en.vtt`, `{video_id}.en-orig.vtt`, or similar.
 /// We try the expected name first, then glob for any `.vtt` file.
-async fn find_and_read_vtt(
-    dir: &std::path::Path,
-    video_id: &str,
-) -> Result<String, UrlError> {
+async fn find_and_read_vtt(dir: &std::path::Path, video_id: &str) -> Result<String, UrlError> {
     // Try the expected filename first
     let expected = dir.join(format!("{}.en.vtt", video_id));
     if expected.exists() {
@@ -120,19 +131,21 @@ async fn find_and_read_vtt(
     }
 
     // Fallback: find any .vtt file in the temp directory
-    let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| {
-        UrlError::TranscriptFailed {
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| UrlError::TranscriptFailed {
             video_id: video_id.to_string(),
             reason: format!("Failed to read temp directory: {}", e),
-        }
-    })?;
+        })?;
 
-    while let Some(entry) = entries.next_entry().await.map_err(|e| {
-        UrlError::TranscriptFailed {
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| UrlError::TranscriptFailed {
             video_id: video_id.to_string(),
             reason: format!("Failed to read directory entry: {}", e),
-        }
-    })? {
+        })?
+    {
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "vtt") {
             return tokio::fs::read_to_string(&path).await.map_err(|e| {
@@ -151,13 +164,13 @@ async fn find_and_read_vtt(
 }
 
 /// Parse VTT (WebVTT) subtitle format into plain text.
-/// 
+///
 /// Removes:
 /// - "WEBVTT" header
 /// - Timestamp lines (HH:MM:SS.mmm --> HH:MM:SS.mmm)
 /// - HTML formatting tags (<c>, <b>, <i>, <v Speaker>, etc.)
 /// - Extra whitespace
-/// 
+///
 /// Joins subtitle lines with spaces to form readable paragraphs.
 fn parse_vtt(raw: &str) -> String {
     // Regex to match timestamp lines
@@ -184,7 +197,7 @@ fn parse_vtt(raw: &str) -> String {
 
         // Strip HTML tags
         let cleaned = html_tag_regex.replace_all(trimmed, "");
-        
+
         if !cleaned.is_empty() {
             text_lines.push(cleaned.to_string());
         }
@@ -192,10 +205,13 @@ fn parse_vtt(raw: &str) -> String {
 
     // Join lines with spaces and collapse multiple spaces
     let joined = text_lines.join(" ");
-    
+
     // Collapse multiple spaces to single space
     let single_space_regex = Regex::new(r"\s+").expect("Whitespace regex is valid");
-    single_space_regex.replace_all(&joined, " ").trim().to_string()
+    single_space_regex
+        .replace_all(&joined, " ")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -205,19 +221,43 @@ mod tests {
     #[tokio::test]
     async fn test_ytdlp_command_construction() {
         // This test verifies the function exists and has the correct signature.
-        // We test with an invalid video ID to check the command construction path.
+        // We test with a valid video ID format to check the command construction path.
         // Real execution would require yt-dlp to be installed.
-        let result = fetch_transcript("test_video_id").await;
-        
+        let result = fetch_transcript("dQw4w9WgXcQ").await;
+
         // We expect either NotFound (yt-dlp not installed) or a command failure
         assert!(result.is_err());
-        
+
         if let Err(UrlError::TranscriptFailed { video_id, reason }) = result {
-            assert_eq!(video_id, "test_video_id");
+            assert_eq!(video_id, "dQw4w9WgXcQ");
             // Reason should mention either "yt-dlp not found" or some other error
             assert!(!reason.is_empty());
         } else {
             panic!("Expected UrlError::TranscriptFailed");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_transcript_invalid_id() {
+        let invalid_ids = vec![
+            "short",
+            "too_long_video_id",
+            "with spaces ",
+            "semicolon;",
+            "slash/path",
+            "back\\slash",
+            "quote'n",
+            "dash-und_12", // 12 chars
+        ];
+
+        for id in invalid_ids {
+            let result = fetch_transcript(id).await;
+            assert!(result.is_err(), "ID '{}' should be rejected", id);
+            if let Err(UrlError::TranscriptFailed { reason, .. }) = result {
+                assert_eq!(reason, "Invalid video ID format");
+            } else {
+                panic!("Expected UrlError::TranscriptFailed for ID '{}'", id);
+            }
         }
     }
 
@@ -232,7 +272,10 @@ This is the first subtitle line
 This is the second line"#;
 
         let result = parse_vtt(vtt);
-        assert_eq!(result, "This is the first subtitle line This is the second line");
+        assert_eq!(
+            result,
+            "This is the first subtitle line This is the second line"
+        );
     }
 
     #[test]
@@ -246,7 +289,10 @@ This has <c>color tags</c> and <b>bold</b> and <i>italic</i>
 Also <v Speaker>speaker tags</v>"#;
 
         let result = parse_vtt(vtt);
-        assert_eq!(result, "This has color tags and bold and italic Also speaker tags");
+        assert_eq!(
+            result,
+            "This has color tags and bold and italic Also speaker tags"
+        );
     }
 
     #[test]
@@ -336,7 +382,7 @@ Including <i>various</i> <c>formatting</c> options"#;
     // 1. It requires yt-dlp to be installed in test environment
     // 2. It requires network access to YouTube
     // 3. It would make tests slow and flaky
-    // 
+    //
     // Error handling for missing yt-dlp and no captions is tested by the error mapping
     // in fetch_transcript() implementation.
 }
