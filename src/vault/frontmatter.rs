@@ -156,6 +156,35 @@ mod tests {
     }
 
     #[test]
+    fn test_merge_existing_not_mapping() {
+        let mut existing = serde_yml::Value::String("not a mapping".to_string());
+        let new = HashMap::from([("gewicht".to_string(), serde_json::json!(80.2))]);
+
+        merge_frontmatter(&mut existing, &new, &["date", "tags"]);
+
+        let map = as_mapping(&existing);
+        assert_eq!(
+            map.get("gewicht"),
+            Some(&serde_yml::to_value(80.2).expect("yaml value"))
+        );
+    }
+
+    #[test]
+    fn test_merge_empty_new() {
+        let mut existing =
+            serde_yml::from_str::<serde_yml::Value>("date: 2026-03-16\ntags: [daily]")
+                .expect("valid YAML");
+        let new = HashMap::new();
+
+        merge_frontmatter(&mut existing, &new, &["date", "tags"]);
+
+        let map = as_mapping(&existing);
+        assert!(map.contains_key("date"));
+        assert!(map.contains_key("tags"));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
     fn test_merge_upsert() {
         let mut existing =
             serde_yml::from_str::<serde_yml::Value>("date: 2026-03-16\ntags: [daily]")
