@@ -123,7 +123,7 @@ pub async fn handle_url_message(
                     url: detected_url.url.clone(),
                 };
 
-                let guide = crate::ai::guide::load_guide(&config.guide_path);
+                let guide = crate::ai::guide::load_guide(&config.guide_path).await;
                 let summary = match ai_client
                     .summarize_url(
                         &page_content,
@@ -231,7 +231,7 @@ pub async fn handle_url_message(
                     ));
                 }
 
-                let guide = crate::ai::guide::load_guide(&config.guide_path);
+                let guide = crate::ai::guide::load_guide(&config.guide_path).await;
 
                 match ai_client
                     .summarize_url(
@@ -396,7 +396,7 @@ pub async fn handle_transcript_callback(
             url: request.url.clone(),
         };
 
-        let guide = crate::ai::guide::load_guide(&config.guide_path);
+        let guide = crate::ai::guide::load_guide(&config.guide_path).await;
         let summary = match ai_client
             .summarize_url(
                 &page_content,

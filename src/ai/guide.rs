@@ -6,10 +6,10 @@ use std::path::PathBuf;
 /// * `path` - Optional path to guide file. Returns None if path is None.
 /// * On file read error, logs warning and returns None.
 /// * Empty files return None.
-pub fn load_guide(path: &Option<PathBuf>) -> Option<String> {
+pub async fn load_guide(path: &Option<PathBuf>) -> Option<String> {
     let path = path.as_ref()?;
 
-    match std::fs::read_to_string(path) {
+    match tokio::fs::read_to_string(path).await {
         Ok(content) => {
             let trimmed = content.trim().to_string();
             if trimmed.is_empty() {
@@ -47,41 +47,41 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    #[test]
-    fn test_load_guide_from_file() {
+    #[tokio::test]
+    async fn test_load_guide_from_file() {
         let mut temp_file = NamedTempFile::new().unwrap();
         let guide_content = "This is a user guide\nwith multiple lines";
         temp_file.write_all(guide_content.as_bytes()).unwrap();
         temp_file.flush().unwrap();
 
         let path = Some(temp_file.path().to_path_buf());
-        let result = load_guide(&path);
+        let result = load_guide(&path).await;
 
         assert!(result.is_some());
         assert_eq!(result.unwrap(), guide_content);
     }
 
-    #[test]
-    fn test_load_guide_missing_file() {
+    #[tokio::test]
+    async fn test_load_guide_missing_file() {
         let path = Some(PathBuf::from("/nonexistent/path/to/guide.md"));
-        let result = load_guide(&path);
+        let result = load_guide(&path).await;
 
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_load_guide_empty_file() {
+    #[tokio::test]
+    async fn test_load_guide_empty_file() {
         let temp_file = NamedTempFile::new().unwrap();
         let path = Some(temp_file.path().to_path_buf());
-        let result = load_guide(&path);
+        let result = load_guide(&path).await;
 
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_load_guide_none_path() {
+    #[tokio::test]
+    async fn test_load_guide_none_path() {
         let path: Option<PathBuf> = None;
-        let result = load_guide(&path);
+        let result = load_guide(&path).await;
 
         assert!(result.is_none());
     }

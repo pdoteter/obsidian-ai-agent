@@ -69,7 +69,7 @@ pub async fn handle_text_message(
     bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
 
     // Classify the text with AI
-    let guide = crate::ai::guide::load_guide(&config.guide_path);
+    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
     let classified = match ai_client
         .classify_text(&text, &config.openrouter_model_classify, guide.as_deref())
         .await
