@@ -125,34 +125,106 @@ mod tests {
         value.as_mapping().expect("expected YAML mapping")
     }
 
-    #[test]
-    fn test_parse_frontmatter() {
-        let content = "---\ndate: 2026-03-16\ntags: [daily]\n---\n# Title";
-        let (yaml, body) = parse_frontmatter(content);
-
-        assert_eq!(body, "# Title");
-        let yaml = yaml.expect("expected frontmatter to parse");
-        let map = as_mapping(&yaml);
-        assert!(map.contains_key("date"));
-        assert!(map.contains_key("tags"));
+    struct TestCase<'a> {
+        name: &'a str,
+        input: &'a str,
+        expected_yaml_keys: Option<Vec<&'a str>>,
+        expected_body: &'a str,
     }
 
     #[test]
-    fn test_parse_no_frontmatter() {
-        let content = "# Title\nContent";
-        let (yaml, body) = parse_frontmatter(content);
+    fn test_parse_frontmatter_cases() {
+        let cases = [
+            TestCase {
+                name: "standard valid",
+                input: "---\ndate: 2026-03-16\ntags: [daily]\n---\n# Title",
+                expected_yaml_keys: Some(vec!["date", "tags"]),
+                expected_body: "# Title",
+            },
+            TestCase {
+                name: "windows newlines",
+                input: "---\r\ndate: 2026-03-16\r\ntags: [daily]\r\n---\r\n# Title",
+                expected_yaml_keys: Some(vec!["date", "tags"]),
+                expected_body: "# Title",
+            },
+            TestCase {
+                name: "no frontmatter",
+                input: "# Title\nContent",
+                expected_yaml_keys: None,
+                expected_body: "# Title\nContent",
+            },
+            TestCase {
+                name: "malformed frontmatter",
+                input: "---\ninvalid: [unclosed\n---\n# Title",
+                expected_yaml_keys: None,
+                expected_body: "---\ninvalid: [unclosed\n---\n# Title",
+            },
+            TestCase {
+                name: "unclosed frontmatter",
+                input: "---\ndate: 2026-03-16\n# Title",
+                expected_yaml_keys: None,
+                expected_body: "---\ndate: 2026-03-16\n# Title",
+            },
+            TestCase {
+                name: "empty string",
+                input: "",
+                expected_yaml_keys: None,
+                expected_body: "",
+            },
+            TestCase {
+                name: "body containing hr",
+                input: "---\ndate: 2026-03-16\n---\n# Title\n---\nMore content",
+                expected_yaml_keys: Some(vec!["date"]),
+                expected_body: "# Title\n---\nMore content",
+            },
+            TestCase {
+                name: "empty frontmatter",
+                input: "---\n---\n# Title",
+                expected_yaml_keys: Some(vec![]),
+                expected_body: "# Title",
+            },
+        ];
 
-        assert!(yaml.is_none());
-        assert_eq!(body, content);
-    }
+        for case in cases {
+            let (yaml, body) = parse_frontmatter(case.input);
+            assert_eq!(
+                body, case.expected_body,
+                "Failed on case: {} (body mismatch)",
+                case.name
+            );
 
-    #[test]
-    fn test_parse_malformed_frontmatter() {
-        let content = "---\ninvalid: [unclosed\n---";
-        let (yaml, body) = parse_frontmatter(content);
-
-        assert!(yaml.is_none());
-        assert_eq!(body, content);
+            match (yaml, case.expected_yaml_keys) {
+                (Some(y), Some(expected_keys)) => {
+                    let map = if y.is_null() {
+                        assert!(
+                            expected_keys.is_empty(),
+                            "Failed on case: {} (parsed as Null but expected keys)",
+                            case.name
+                        );
+                        continue; // For empty frontmatter, yaml might parse as Null instead of empty Mapping
+                    } else {
+                        as_mapping(&y)
+                    };
+                    for key in &expected_keys {
+                        assert!(
+                            map.contains_key(*key),
+                            "Failed on case: {} (missing key: {})",
+                            case.name,
+                            key
+                        );
+                    }
+                    assert_eq!(
+                        map.len(),
+                        expected_keys.len(),
+                        "Failed on case: {} (unexpected extra keys)",
+                        case.name
+                    );
+                }
+                (None, None) => {}
+                (Some(_), None) => panic!("Failed on case: {} (expected None, got Some)", case.name),
+                (None, Some(_)) => panic!("Failed on case: {} (expected Some, got None)", case.name),
+            }
+        }
     }
 
     #[test]
