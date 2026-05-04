@@ -26,20 +26,51 @@ fn truncate_content(s: &str, max_chars: usize) -> String {
 
 /// Parse AI response text into structured ConflictAnalysis
 pub fn parse_analysis_response(text: &str) -> ConflictAnalysis {
-    let mut summary = String::new();
-    let mut recommendation = String::new();
-    let mut confidence = String::new();
+    let mut summary = Vec::new();
+    let mut recommendation = Vec::new();
+    let mut confidence = Vec::new();
+
+    #[derive(Clone, Copy)]
+    enum Field {
+        Summary,
+        Recommendation,
+        Confidence,
+    }
+
+    let mut current_field = None;
 
     for line in text.lines() {
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix("SUMMARY:") {
-            summary = value.trim().to_string();
+            let value_trimmed = value.trim();
+            if !value_trimmed.is_empty() {
+                summary.push(value_trimmed);
+            }
+            current_field = Some(Field::Summary);
         } else if let Some(value) = trimmed.strip_prefix("RECOMMENDATION:") {
-            recommendation = value.trim().to_string();
+            let value_trimmed = value.trim();
+            if !value_trimmed.is_empty() {
+                recommendation.push(value_trimmed);
+            }
+            current_field = Some(Field::Recommendation);
         } else if let Some(value) = trimmed.strip_prefix("CONFIDENCE:") {
-            confidence = value.trim().to_string();
+            let value_trimmed = value.trim();
+            if !value_trimmed.is_empty() {
+                confidence.push(value_trimmed);
+            }
+            current_field = Some(Field::Confidence);
+        } else if let Some(field) = current_field {
+            match field {
+                Field::Summary => summary.push(trimmed),
+                Field::Recommendation => recommendation.push(trimmed),
+                Field::Confidence => confidence.push(trimmed),
+            }
         }
     }
+
+    let summary = summary.join("\n").trim().to_string();
+    let recommendation = recommendation.join("\n").trim().to_string();
+    let confidence = confidence.join("\n").trim().to_string();
 
     // If parsing completely failed, return raw text as summary
     if summary.is_empty() && recommendation.is_empty() && confidence.is_empty() {
@@ -70,7 +101,8 @@ pub async fn analyze_conflict(
     theirs_content: &str,
     diff: &str,
 ) -> Result<ConflictAnalysis, AiError> {
-    let system_prompt = "You are analyzing a git merge conflict in an Obsidian vault (markdown notes). \
+    let system_prompt =
+        "You are analyzing a git merge conflict in an Obsidian vault (markdown notes). \
         Explain what's different between the two versions in simple terms. \
         Recommend which version to keep. Be concise — max 3 sentences for summary, \
         1 sentence for recommendation.\n\n\
@@ -149,7 +181,10 @@ pub async fn analyze_conflicts(
             }
             Err(e) => {
                 warn!(file = %file_name, error = %e, "AI analysis failed for file");
-                analyses.push(format!("📄 **{}**\nAI analysis unavailable: {}", file_name, e));
+                analyses.push(format!(
+                    "📄 **{}**\nAI analysis unavailable: {}",
+                    file_name, e
+                ));
             }
         }
     }
@@ -200,5 +235,17 @@ mod tests {
         assert_eq!(analysis.summary, response);
         assert!(analysis.recommendation.is_empty());
         assert_eq!(analysis.confidence, "unknown");
+    }
+
+    #[test]
+    fn test_parse_analysis_response_multiline() {
+        let response = "SUMMARY: Line 1 of summary.\nLine 2 of summary.\nRECOMMENDATION:\nLine 1 of recommendation.\nLine 2 of recommendation.\nCONFIDENCE: medium";
+        let analysis = parse_analysis_response(response);
+        assert_eq!(analysis.summary, "Line 1 of summary.\nLine 2 of summary.");
+        assert_eq!(
+            analysis.recommendation,
+            "Line 1 of recommendation.\nLine 2 of recommendation."
+        );
+        assert_eq!(analysis.confidence, "medium");
     }
 }
