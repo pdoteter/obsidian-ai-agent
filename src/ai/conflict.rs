@@ -70,7 +70,8 @@ pub async fn analyze_conflict(
     theirs_content: &str,
     diff: &str,
 ) -> Result<ConflictAnalysis, AiError> {
-    let system_prompt = "You are analyzing a git merge conflict in an Obsidian vault (markdown notes). \
+    let system_prompt =
+        "You are analyzing a git merge conflict in an Obsidian vault (markdown notes). \
         Explain what's different between the two versions in simple terms. \
         Recommend which version to keep. Be concise — max 3 sentences for summary, \
         1 sentence for recommendation.\n\n\
@@ -149,7 +150,10 @@ pub async fn analyze_conflicts(
             }
             Err(e) => {
                 warn!(file = %file_name, error = %e, "AI analysis failed for file");
-                analyses.push(format!("📄 **{}**\nAI analysis unavailable: {}", file_name, e));
+                analyses.push(format!(
+                    "📄 **{}**\nAI analysis unavailable: {}",
+                    file_name, e
+                ));
             }
         }
     }

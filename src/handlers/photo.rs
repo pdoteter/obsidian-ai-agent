@@ -47,20 +47,18 @@ pub async fn handle_photo_message(
     let caption = msg.caption().map(|s| s.to_string());
 
     // 4. Download to memory
-    let file = bot
-        .get_file(&photo.file.id)
-        .await
-        .map_err(|e| {
-            error!(error = %e, "Failed to fetch Telegram file metadata for photo");
-            Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
-        })?;
+    let file = bot.get_file(&photo.file.id).await.map_err(|e| {
+        error!(error = %e, "Failed to fetch Telegram file metadata for photo");
+        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    })?;
 
     let mut bytes = Vec::new();
     bot.download_file(&file.path, &mut bytes)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to download photo bytes from Telegram");
-            Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+            Box::new(ImageError::Download(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     info!(
@@ -69,15 +67,15 @@ pub async fn handle_photo_message(
         "Downloaded photo"
     );
 
-    bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto).await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto)
+        .await?;
 
     // 5. Resize
-    let resized = crate::image::process::resize_image(&bytes, config.image.max_dimension).map_err(
-        |e| {
+    let resized =
+        crate::image::process::resize_image(&bytes, config.image.max_dimension).map_err(|e| {
             error!(error = %e, "Failed to resize photo");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-        },
-    )?;
+        })?;
 
     // 6. EXIF from original bytes
     let exif_data = crate::image::exif::extract_exif(&bytes);
@@ -102,9 +100,7 @@ pub async fn handle_photo_message(
 
     // 10. Generate filename (with fallback on AI failure)
     // Use a path-safe date format for filenames (not date_display_format which may contain '/')
-    let today = chrono::Local::now()
-        .format("%Y-%m-%d")
-        .to_string();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let (filename, summary) = match &classified {
         Ok(c) => {
@@ -128,10 +124,14 @@ pub async fn handle_photo_message(
         error!(error = %e, "Failed to ensure today's daily note before saving photo");
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
-    let note_dir = note_path.parent().ok_or("Daily note has no parent directory").map_err(|e| {
-        error!(error = %e, "Failed to resolve daily note parent directory");
-        Box::new(ImageError::SaveFailed(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    let note_dir = note_path
+        .parent()
+        .ok_or("Daily note has no parent directory")
+        .map_err(|e| {
+            error!(error = %e, "Failed to resolve daily note parent directory");
+            Box::new(ImageError::SaveFailed(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
     // 12. Save image
     let saved_path = crate::image::process::save_image(
@@ -168,10 +168,13 @@ pub async fn handle_photo_message(
         ),
     };
 
-    vault.append_to_section("## 📝 Notes", &content).await.map_err(|e| {
-        error!(error = %e, "Failed to append photo entry to daily note");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    vault
+        .append_to_section("## 📝 Notes", &content)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to append photo entry to daily note");
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
     // 14. Update frontmatter if present
     if let Ok(c) = &classified {
@@ -261,8 +264,17 @@ mod tests {
     #[test]
     fn test_generate_fallback_filename_with_slashes_in_date() {
         let filename = generate_fallback_filename("2026/03/24");
-        assert!(!filename.contains('/'), "filename should not contain forward slashes");
-        assert!(!filename.contains('\\'), "filename should not contain backslashes");
-        assert!(filename.starts_with("2026-03-24-photo-"), "slashes should be replaced with dashes");
+        assert!(
+            !filename.contains('/'),
+            "filename should not contain forward slashes"
+        );
+        assert!(
+            !filename.contains('\\'),
+            "filename should not contain backslashes"
+        );
+        assert!(
+            filename.starts_with("2026-03-24-photo-"),
+            "slashes should be replaced with dashes"
+        );
     }
 }

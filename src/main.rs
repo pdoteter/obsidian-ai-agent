@@ -8,8 +8,8 @@ mod image;
 mod url;
 mod vault;
 
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
@@ -92,7 +92,10 @@ async fn main() {
 
     // Initialize git sync with debouncing (if enabled)
     let sync_notifier: Option<debounce::SyncNotifier> = if config.git_sync_enabled {
-        let git_path = config.git_path.clone().expect("GIT_PATH required when git sync enabled");
+        let git_path = config
+            .git_path
+            .clone()
+            .expect("GIT_PATH required when git sync enabled");
         let git_sync = Arc::new(GitSync::new(
             git_path,
             config.git_remote_name.clone(),
@@ -181,11 +184,28 @@ async fn handle_message(
 ) -> HandlerResult {
     // Route based on message content type
     if msg.photo().is_some() {
-        handlers::photo::handle_photo_message(bot, msg, config, ai_client, vault, sync_notifier, chat_tracker)
-            .await
+        handlers::photo::handle_photo_message(
+            bot,
+            msg,
+            config,
+            ai_client,
+            vault,
+            sync_notifier,
+            chat_tracker,
+        )
+        .await
     } else if msg.voice().is_some() {
-        handlers::voice::handle_voice_message(bot, msg, config, ai_client, whisper_client, vault, sync_notifier, chat_tracker)
-            .await
+        handlers::voice::handle_voice_message(
+            bot,
+            msg,
+            config,
+            ai_client,
+            whisper_client,
+            vault,
+            sync_notifier,
+            chat_tracker,
+        )
+        .await
     } else if msg.text().is_some() {
         handlers::text::handle_text_message(
             bot,
@@ -229,7 +249,10 @@ async fn handle_callback(
 ) -> HandlerResult {
     // Enforce same authorization policy as message handlers before processing callbacks.
     if !config.allowed_user_ids.is_empty() && !config.is_user_allowed(q.from.id.0) {
-        info!(user_id = q.from.id.0, "Unauthorized user, ignoring callback");
+        info!(
+            user_id = q.from.id.0,
+            "Unauthorized user, ignoring callback"
+        );
         return Ok(());
     }
 

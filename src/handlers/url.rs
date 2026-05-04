@@ -13,7 +13,7 @@ use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::url::detect::{DetectedUrl, UrlType};
 use crate::url::extract::fetch_page_content;
-use crate::url::youtube::{fetch_youtube_metadata, fetch_youtube_description};
+use crate::url::youtube::{fetch_youtube_description, fetch_youtube_metadata};
 use crate::url::PageContent;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
@@ -50,7 +50,10 @@ pub async fn handle_url_message(
     // 1) auth check
     if let Some(user) = msg.from.as_ref() {
         if !config.is_user_allowed(user.id.0) {
-            info!(user_id = user.id.0, "Unauthorized user, ignoring URL message");
+            info!(
+                user_id = user.id.0,
+                "Unauthorized user, ignoring URL message"
+            );
             return Ok(());
         }
     }
@@ -65,10 +68,7 @@ pub async fn handle_url_message(
 
     // 3) immediate processing message before network work
     let status_msg = bot
-        .send_message(
-            msg.chat.id,
-            build_processing_message(urls_to_process.len()),
-        )
+        .send_message(msg.chat.id, build_processing_message(urls_to_process.len()))
         .await?;
 
     // 4) process each URL with graceful degradation
@@ -77,17 +77,21 @@ pub async fn handle_url_message(
     let mut transcript_buttons: Vec<InlineKeyboardButton> = Vec::new();
 
     for detected_url in &urls_to_process {
-        bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
+        bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+            .await?;
 
         // Check if this is a YouTube URL with transcript keyword
-        let is_transcript_direct_flow = if let UrlType::YouTube { video_id: _ } = &detected_url.url_type {
-            let is_transcript_req = crate::url::is_transcript_request(
-                surrounding_text.as_deref().unwrap_or(msg.text().unwrap_or("")),
-            );
-            is_transcript_req
-        } else {
-            false
-        };
+        let is_transcript_direct_flow =
+            if let UrlType::YouTube { video_id: _ } = &detected_url.url_type {
+                let is_transcript_req = crate::url::is_transcript_request(
+                    surrounding_text
+                        .as_deref()
+                        .unwrap_or(msg.text().unwrap_or("")),
+                );
+                is_transcript_req
+            } else {
+                false
+            };
 
         // Direct transcript flow for keyword-triggered requests
         if is_transcript_direct_flow {
@@ -99,8 +103,11 @@ pub async fn handle_url_message(
                     Ok(text) => text,
                     Err(e) => {
                         error!(error = %e, video_id = %video_id, "Failed to fetch transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch transcript: {}", e))
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("❌ Failed to fetch transcript: {}", e),
+                        )
+                        .await?;
                         continue;
                     }
                 };
@@ -110,8 +117,11 @@ pub async fn handle_url_message(
                     Ok(page) => page,
                     Err(e) => {
                         error!(error = %e, url = %detected_url.url, "Failed to fetch YouTube metadata");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to fetch video metadata: {}", e))
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("❌ Failed to fetch video metadata: {}", e),
+                        )
+                        .await?;
                         continue;
                     }
                 };
@@ -136,14 +146,19 @@ pub async fn handle_url_message(
                     Ok(s) => s,
                     Err(e) => {
                         error!(error = %e, url = %detected_url.url, "Failed to summarize transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to summarize transcript: {}", e))
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("❌ Failed to summarize transcript: {}", e),
+                        )
+                        .await?;
                         continue;
                     }
                 };
 
                 let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let video_title = fetched_page.title.clone()
+                let video_title = fetched_page
+                    .title
+                    .clone()
                     .unwrap_or_else(|| detected_url.url.clone());
 
                 let transcript_file = match crate::vault::save_transcript(
@@ -160,14 +175,20 @@ pub async fn handle_url_message(
                     Ok(file) => file,
                     Err(e) => {
                         error!(error = %e, video_id = %video_id, "Failed to save transcript");
-                        bot.send_message(msg.chat.id, format!("❌ Failed to save transcript: {}", e))
-                            .await?;
+                        bot.send_message(
+                            msg.chat.id,
+                            format!("❌ Failed to save transcript: {}", e),
+                        )
+                        .await?;
                         continue;
                     }
                 };
 
                 let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
-                if let Err(e) = vault.append_to_section("## ✅ Todos", &wiki_link_entry).await {
+                if let Err(e) = vault
+                    .append_to_section("## ✅ Todos", &wiki_link_entry)
+                    .await
+                {
                     warn!(error = %e, "Failed to add transcript wiki-link to daily note");
                 }
 
@@ -249,11 +270,7 @@ pub async fn handle_url_message(
                             tags_count = summary.tags.len(),
                             "AI summarized URL"
                         );
-                        (
-                            Some(summary.title),
-                            Some(summary.summary),
-                            summary.tags,
-                        )
+                        (Some(summary.title), Some(summary.summary), summary.tags)
                     }
                     Err(e) => {
                         // Graceful degradation: AI failed -> title-only TODO
@@ -317,7 +334,7 @@ pub async fn handle_url_message(
         truncated,
         &results,
     );
-    
+
     let confirmation = truncate_confirmation_if_needed(confirmation);
 
     if transcript_buttons.is_empty() {
@@ -378,7 +395,8 @@ pub async fn handle_transcript_callback(
     };
 
     if let Some(chat_id) = chat_id {
-        bot.send_message(chat_id, "⏳ Fetching transcript...").await?;
+        bot.send_message(chat_id, "⏳ Fetching transcript...")
+            .await?;
 
         let transcript_text = match crate::url::fetch_transcript(&request.video_id).await {
             Ok(text) => text,
@@ -416,7 +434,11 @@ pub async fn handle_transcript_callback(
 
         // Format transcript with AI before saving
         let formatted_transcript = match ai_client
-            .format_transcript(&transcript_text, &request.title, &config.openrouter_model_classify)
+            .format_transcript(
+                &transcript_text,
+                &request.title,
+                &config.openrouter_model_classify,
+            )
             .await
         {
             Ok(formatted) => formatted,
@@ -454,7 +476,10 @@ pub async fn handle_transcript_callback(
             Some(&transcript_file.wiki_link),
             Some(&request.title),
         );
-        if let Err(e) = vault.replace_entry_by_url(section, &request.url, &content).await {
+        if let Err(e) = vault
+            .replace_entry_by_url(section, &request.url, &content)
+            .await
+        {
             warn!(error = %e, section, url = %request.url, "Failed to replace entry in daily note");
         }
 
@@ -530,7 +555,7 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
 
     // Split into lines to identify header vs results
     let lines: Vec<&str> = confirmation.split('\n').collect();
-    
+
     // Find where results section starts (first line with ✅ or ❌)
     let mut header_end_idx = 0;
     for (i, line) in lines.iter().enumerate() {
@@ -553,7 +578,7 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
     // Keep header, progressively remove result lines from the end
     let header_lines = &lines[..header_end_idx];
     let result_lines = &lines[header_end_idx..];
-    
+
     let mut kept_results = result_lines.len();
     let mut message = header_lines.join("\n") + "\n\n" + &result_lines.join("\n");
 
@@ -563,7 +588,7 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
     }
 
     let removed_count = result_lines.len() - kept_results;
-    
+
     // Add truncation notice if results were removed
     if removed_count > 0 {
         message.push_str(&format!("\n\n... ({} more URLs not shown)", removed_count));
@@ -616,7 +641,10 @@ async fn fetch_for_url_type(
                 Ok(desc) => {
                     info!(video_id = %video_id, description_length = desc.len(), "Fetched YouTube description");
                     (
-                        format!("{}\n\nBy: {}\n\nDescription:\n{}", metadata.title, metadata.author, desc),
+                        format!(
+                            "{}\n\nBy: {}\n\nDescription:\n{}",
+                            metadata.title, metadata.author, desc
+                        ),
                         Some(desc),
                     )
                 }

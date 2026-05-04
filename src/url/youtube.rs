@@ -88,9 +88,10 @@ pub async fn fetch_youtube_metadata(
     }
 
     // 6. Parse JSON response
-    let oembed: OEmbedResponse = response.json().await.map_err(|e| {
-        UrlError::ParseFailed(format!("Failed to parse oEmbed JSON: {}", e))
-    })?;
+    let oembed: OEmbedResponse = response
+        .json()
+        .await
+        .map_err(|e| UrlError::ParseFailed(format!("Failed to parse oEmbed JSON: {}", e)))?;
 
     // 7. Build YouTubeMetadata
     Ok(YouTubeMetadata {
@@ -157,9 +158,7 @@ pub async fn fetch_youtube_description(
     }
 
     // Parse stdout as UTF-8 and trim whitespace
-    let description = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let description = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Return error if description is empty
     if description.is_empty() {
@@ -336,7 +335,10 @@ mod tests {
     fn test_fetch_youtube_description_empty_string_validation() {
         // Test that an empty description would be rejected
         let empty_desc = "";
-        assert!(empty_desc.trim().is_empty(), "Empty description should fail validation");
+        assert!(
+            empty_desc.trim().is_empty(),
+            "Empty description should fail validation"
+        );
     }
 
     #[test]

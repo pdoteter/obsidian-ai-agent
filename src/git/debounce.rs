@@ -5,13 +5,13 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
-use crate::error::GitError;
 use super::chat_tracker::ChatIdTracker;
 use super::conflict::ConflictResolver;
 use super::sync::{GitSync, SyncResult};
 use crate::ai::client::OpenRouterClient;
 use crate::ai::conflict::analyze_conflicts;
 use crate::config::Config;
+use crate::error::GitError;
 
 /// A handle to notify the debounced git sync that changes occurred
 #[derive(Debug, Clone)]
@@ -167,7 +167,7 @@ pub fn spawn_debounced_sync(
                             }
                             SyncResult::ConflictDetected(info) => {
                                 warn!(files = ?info.files, "Git sync: conflict detected");
-                                
+
                                 // Set resolving flag
                                 resolving.store(true, Ordering::SeqCst);
 
@@ -186,11 +186,17 @@ pub fn spawn_debounced_sync(
                                     let ai_client = ai_client.clone();
                                     let config = config.clone();
                                     let info_clone = info.clone();
-                                    
+
                                     match tokio::time::timeout(
                                         Duration::from_secs(25),
-                                        analyze_conflicts(&ai_client, &config.openrouter_model_classify, &info_clone)
-                                    ).await {
+                                        analyze_conflicts(
+                                            &ai_client,
+                                            &config.openrouter_model_classify,
+                                            &info_clone,
+                                        ),
+                                    )
+                                    .await
+                                    {
                                         Ok(Ok(analysis)) => Some(analysis),
                                         Ok(Err(e)) => {
                                             warn!(error = %e, "AI conflict analysis failed");
@@ -216,7 +222,12 @@ pub fn spawn_debounced_sync(
 
                                 // Ask user for resolution
                                 let resolution_result = conflict_resolver
-                                    .ask_resolution(chat_id, &info.files, ai_analysis, &diff_preview)
+                                    .ask_resolution(
+                                        chat_id,
+                                        &info.files,
+                                        ai_analysis,
+                                        &diff_preview,
+                                    )
                                     .await;
 
                                 match resolution_result {
@@ -228,21 +239,36 @@ pub fn spawn_debounced_sync(
                                         let resolution_clone = resolution.clone();
                                         let exec_result = tokio::task::spawn_blocking(move || {
                                             match resolution_clone {
-                                                super::conflict::ConflictResolution::Ours => git.resolve_ours(),
-                                                super::conflict::ConflictResolution::Theirs => git.resolve_theirs(),
-                                                super::conflict::ConflictResolution::Abort => git.resolve_abort(),
+                                                super::conflict::ConflictResolution::Ours => {
+                                                    git.resolve_ours()
+                                                }
+                                                super::conflict::ConflictResolution::Theirs => {
+                                                    git.resolve_theirs()
+                                                }
+                                                super::conflict::ConflictResolution::Abort => {
+                                                    git.resolve_abort()
+                                                }
                                             }
-                                        }).await;
+                                        })
+                                        .await;
 
                                         match exec_result {
                                             Ok(Ok(())) => {
                                                 info!("Conflict resolution executed successfully");
 
                                                 // Retry sync if resolution was Ours or Theirs
-                                                if resolution != super::conflict::ConflictResolution::Abort {
-                                                    info!("Retrying sync after conflict resolution");
+                                                if resolution
+                                                    != super::conflict::ConflictResolution::Abort
+                                                {
+                                                    info!(
+                                                        "Retrying sync after conflict resolution"
+                                                    );
                                                     let git = git_sync.clone();
-                                                    let retry_result = tokio::task::spawn_blocking(move || git.full_sync()).await;
+                                                    let retry_result =
+                                                        tokio::task::spawn_blocking(move || {
+                                                            git.full_sync()
+                                                        })
+                                                        .await;
 
                                                     match retry_result {
                                                         Ok(Ok(retry_sync_result)) => {
