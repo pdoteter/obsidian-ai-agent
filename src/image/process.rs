@@ -200,17 +200,19 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_base64() {
+    fn test_encode_base64() -> Result<(), String> {
         let test_bytes = vec![1, 2, 3, 4];
         
         let encoded = encode_base64(&test_bytes);
         
-        // Should start with data:image/jpeg;base64,
-        assert!(encoded.starts_with("data:image/jpeg;base64,"));
-        
         // Extract base64 part and verify it's valid
-        let base64_part = encoded.strip_prefix("data:image/jpeg;base64,").unwrap();
+        let base64_part = encoded
+            .strip_prefix("data:image/jpeg;base64,")
+            .ok_or_else(|| "Missing expected base64 prefix".to_string())?;
+
         assert!(!base64_part.is_empty());
+
+        Ok(())
     }
 
     #[tokio::test]
