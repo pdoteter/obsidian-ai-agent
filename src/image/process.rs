@@ -73,16 +73,21 @@ pub fn sanitize_slug(raw: &str) -> String {
         .collect::<String>();
     
     // Collapse multiple consecutive hyphens
-    while slug.contains("--") {
-        slug = slug.replace("--", "-");
+    if let Ok(re) = regex::Regex::new(r"-{2,}") {
+        slug = re.replace_all(&slug, "-").into_owned();
+    } else {
+        // Fallback if regex fails
+        while slug.contains("--") {
+            slug = slug.replace("--", "-");
+        }
     }
     
     // Trim leading/trailing hyphens
     slug = slug.trim_matches('-').to_string();
     
     // Truncate to 50 chars
-    if slug.len() > 50 {
-        slug.truncate(50);
+    if slug.chars().count() > 50 {
+        slug = crate::utils::truncate_chars(&slug, 50);
         // Re-trim trailing hyphen in case truncation created one
         slug = slug.trim_end_matches('-').to_string();
     }
@@ -93,7 +98,8 @@ pub fn sanitize_slug(raw: &str) -> String {
 pub fn generate_filename(date: &str, slug: &str) -> String {
     let safe_date = date.replace(['/', '\\'], "-");
     let sanitized = sanitize_slug(slug);
-    let uuid_suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    let uuid_str = uuid::Uuid::new_v4().to_string();
+    let uuid_suffix = crate::utils::safe_truncate(&uuid_str, 4);
     format!("{}-{}-{}.jpg", safe_date, sanitized, uuid_suffix)
 }
 
@@ -250,6 +256,16 @@ mod tests {
         // Verify dir was created
         assert!(assets_path.exists());
         assert!(result.exists());
+    }
+
+    #[test]
+    fn test_sanitize_slug_unicode() {
+        let raw = "🦀🦀🦀 Crab Party 🦀🦀🦀";
+        let sanitized = sanitize_slug(raw);
+        // Each 🦀 is replaced by '-' or similar if not alphanumeric.
+        // Actually sanitize_slug replaces non-ascii-alphanumeric with '-'.
+        // So 🦀 (unicode) will become '-'.
+        assert!(sanitized.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
     }
 
     #[test]

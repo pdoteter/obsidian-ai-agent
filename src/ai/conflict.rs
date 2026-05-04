@@ -17,11 +17,7 @@ fn truncate_content(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
         return s.to_string();
     }
-    let mut end = max_chars;
-    while !s.is_char_boundary(end) && end > 0 {
-        end -= 1;
-    }
-    format!("{}... (truncated)", &s[..end])
+    format!("{}... (truncated)", crate::utils::safe_truncate(s, max_chars))
 }
 
 /// Parse AI response text into structured ConflictAnalysis
