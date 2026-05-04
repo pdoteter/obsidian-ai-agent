@@ -105,10 +105,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
 ///
 /// yt-dlp may name it `{video_id}.en.vtt`, `{video_id}.en-orig.vtt`, or similar.
 /// We try the expected name first, then glob for any `.vtt` file.
-async fn find_and_read_vtt(
-    dir: &std::path::Path,
-    video_id: &str,
-) -> Result<String, UrlError> {
+async fn find_and_read_vtt(dir: &std::path::Path, video_id: &str) -> Result<String, UrlError> {
     // Try the expected filename first
     let expected = dir.join(format!("{}.en.vtt", video_id));
     if expected.exists() {
@@ -121,19 +118,21 @@ async fn find_and_read_vtt(
     }
 
     // Fallback: find any .vtt file in the temp directory
-    let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| {
-        UrlError::TranscriptFailed {
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| UrlError::TranscriptFailed {
             video_id: video_id.to_string(),
             reason: format!("Failed to read temp directory: {}", e),
-        }
-    })?;
+        })?;
 
-    while let Some(entry) = entries.next_entry().await.map_err(|e| {
-        UrlError::TranscriptFailed {
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| UrlError::TranscriptFailed {
             video_id: video_id.to_string(),
             reason: format!("Failed to read directory entry: {}", e),
-        }
-    })? {
+        })?
+    {
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "vtt") {
             return tokio::fs::read_to_string(&path).await.map_err(|e| {
@@ -165,13 +164,13 @@ static SINGLE_SPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Parse VTT (WebVTT) subtitle format into plain text.
-/// 
+///
 /// Removes:
 /// - "WEBVTT" header
 /// - Timestamp lines (HH:MM:SS.mmm --> HH:MM:SS.mmm)
 /// - HTML formatting tags (<c>, <b>, <i>, <v Speaker>, etc.)
 /// - Extra whitespace
-/// 
+///
 /// Joins subtitle lines with spaces to form readable paragraphs.
 fn parse_vtt(raw: &str) -> String {
     let mut text_lines = Vec::new();
@@ -199,7 +198,7 @@ fn parse_vtt(raw: &str) -> String {
 
     // Join lines with spaces and collapse multiple spaces
     let joined = text_lines.join(" ");
-    
+
     // Collapse multiple spaces to single space
     SINGLE_SPACE_REGEX.replace_all(&joined, " ").trim().to_string()
 }
@@ -214,10 +213,10 @@ mod tests {
         // We test with an invalid video ID to check the command construction path.
         // Real execution would require yt-dlp to be installed.
         let result = fetch_transcript("test_video_id").await;
-        
+
         // We expect either NotFound (yt-dlp not installed) or a command failure
         assert!(result.is_err());
-        
+
         if let Err(UrlError::TranscriptFailed { video_id, reason }) = result {
             assert_eq!(video_id, "test_video_id");
             // Reason should mention either "yt-dlp not found" or some other error
@@ -238,7 +237,10 @@ This is the first subtitle line
 This is the second line"#;
 
         let result = parse_vtt(vtt);
-        assert_eq!(result, "This is the first subtitle line This is the second line");
+        assert_eq!(
+            result,
+            "This is the first subtitle line This is the second line"
+        );
     }
 
     #[test]
@@ -252,7 +254,10 @@ This has <c>color tags</c> and <b>bold</b> and <i>italic</i>
 Also <v Speaker>speaker tags</v>"#;
 
         let result = parse_vtt(vtt);
-        assert_eq!(result, "This has color tags and bold and italic Also speaker tags");
+        assert_eq!(
+            result,
+            "This has color tags and bold and italic Also speaker tags"
+        );
     }
 
     #[test]
@@ -342,7 +347,7 @@ Including <i>various</i> <c>formatting</c> options"#;
     // 1. It requires yt-dlp to be installed in test environment
     // 2. It requires network access to YouTube
     // 3. It would make tests slow and flaky
-    // 
+    //
     // Error handling for missing yt-dlp and no captions is tested by the error mapping
     // in fetch_transcript() implementation.
 }

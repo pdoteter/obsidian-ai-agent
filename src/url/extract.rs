@@ -26,10 +26,7 @@ pub async fn fetch_page_content(
 
     let response = client
         .get(url)
-        .header(
-            USER_AGENT,
-            "Mozilla/5.0 (compatible; ObsidianAIAgent/1.0)",
-        )
+        .header(USER_AGENT, "Mozilla/5.0 (compatible; ObsidianAIAgent/1.0)")
         .send()
         .await
         .map_err(|e| map_reqwest_error(url, timeout_secs, e))?;
@@ -213,7 +210,8 @@ mod tests {
 
     #[tokio::test]
     async fn extracts_html_title_tag() {
-        let html = "<html><head><title>Example Title</title></head><body><p>Hello</p></body></html>";
+        let html =
+            "<html><head><title>Example Title</title></head><body><p>Hello</p></body></html>";
         let url = spawn_server(html_response("HTTP/1.1 200 OK", html), None).await;
 
         let content = fetch_page_content(&url, 5, 1024 * 32).await.unwrap();
@@ -314,6 +312,9 @@ mod tests {
         let err = fetch_page_content("http://127.0.0.1:9/unreachable", 1, 1024 * 32)
             .await
             .unwrap_err();
-        assert!(matches!(err, UrlError::FetchFailed { .. } | UrlError::Timeout { .. }));
+        assert!(matches!(
+            err,
+            UrlError::FetchFailed { .. } | UrlError::Timeout { .. }
+        ));
     }
 }

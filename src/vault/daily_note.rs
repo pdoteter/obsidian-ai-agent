@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::{debug, info, warn};
 
-use crate::git::debounce::SyncNotifier;
 use crate::error::VaultError;
+use crate::git::debounce::SyncNotifier;
 
 const DEFAULT_DAILY_NOTE_FORMAT: &str = "YYYY-MM-DD";
 const DEFAULT_DAILY_NOTE_FOLDER: &str = "";
@@ -169,12 +169,12 @@ fn match_moment_token(chars: &[char], i: usize, len: usize) -> Option<(&'static 
             "YY" => return Some(("%y", 2)),
             "MM" => return Some(("%m", 2)),
             "DD" => return Some(("%d", 2)),
-            "dd" => return Some(("%a", 2)),  // min weekday name → abbreviated in chrono
+            "dd" => return Some(("%a", 2)), // min weekday name → abbreviated in chrono
             "HH" => return Some(("%H", 2)),
             "hh" => return Some(("%I", 2)),
             "mm" => return Some(("%M", 2)),
             "ss" => return Some(("%S", 2)),
-            "Do" => return Some(("%d", 2)),  // ordinal day (1st, 2nd) → plain number in chrono
+            "Do" => return Some(("%d", 2)), // ordinal day (1st, 2nd) → plain number in chrono
             _ => {}
         }
     }
@@ -353,7 +353,10 @@ impl DailyNoteManager {
             let today = Local::now().date_naive();
 
             // Try configured template, fall back to built-in
-            let template = self.read_template().await.unwrap_or_else(|| FALLBACK_TEMPLATE.to_string());
+            let template = self
+                .read_template()
+                .await
+                .unwrap_or_else(|| FALLBACK_TEMPLATE.to_string());
 
             // Replace Obsidian template variables
             // {{date}} uses the configured date_display_format, not the file-path format
@@ -449,10 +452,7 @@ impl DailyNoteManager {
     pub async fn append(&self, content: &str) -> Result<PathBuf, VaultError> {
         let path = self.ensure_today().await?;
 
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .await?;
+        let mut file = fs::OpenOptions::new().append(true).open(&path).await?;
 
         use tokio::io::AsyncWriteExt;
         file.write_all(b"\n").await?;
@@ -647,6 +647,40 @@ mod tests {
     }
 
     #[test]
+    fn test_momentjs_to_chrono_single_digits() {
+        assert_eq!(momentjs_to_chrono("h m s H D M"), "%-I %-M %-S %-H %-d %-m");
+    }
+
+    #[test]
+    fn test_momentjs_to_chrono_12hour_am_pm() {
+        assert_eq!(momentjs_to_chrono("hh:mm:ss A a"), "%I:%M:%S %p %P");
+    }
+
+    #[test]
+    fn test_momentjs_to_chrono_ordinals_and_unix() {
+        assert_eq!(momentjs_to_chrono("Do X"), "%d %s");
+    }
+
+    #[test]
+    fn test_momentjs_to_chrono_day_of_year_and_weekdays() {
+        assert_eq!(momentjs_to_chrono("DDD ddd dd dddd"), "%-j %a %a %A");
+    }
+
+    #[test]
+    fn test_momentjs_to_chrono_literal_preservation() {
+        // The current implementation substitutes recognized single characters like 'a', 'H', 'M'.
+        // It does not support escaping yet, but we should at least document its behavior with non-token characters.
+        assert_eq!(momentjs_to_chrono("YYYY-MM-DD #tag"), "%Y-%m-%d #t%Pg");
+        assert_eq!(momentjs_to_chrono("Hello"), "%-Hello");
+    }
+
+    #[test]
+    fn test_momentjs_to_chrono_longest_match_priority() {
+        assert_eq!(momentjs_to_chrono("MMMM MMM MM M"), "%B %b %m %-m");
+        assert_eq!(momentjs_to_chrono("YYYY YY"), "%Y %y");
+    }
+
+    #[test]
     fn test_default_settings() {
         let settings = DailyNoteSettings::default();
         assert_eq!(settings.folder, "");
@@ -753,7 +787,8 @@ mod tests {
     #[test]
     fn test_replace_in_section_multiple_entries_only_matching_url_replaced() {
         let doc = "# Daily\n\n## ✅ Todos\n- [ ] [First](https://youtube.com/watch?v=aaa)\n  > first summary\n\n- [ ] [Second](https://youtube.com/watch?v=bbb)\n  > second summary\n  #tag\n\n## 📋 Log\n";
-        let replacement = "- [ ] [Second Updated](https://youtube.com/watch?v=bbb)\n  > second updated";
+        let replacement =
+            "- [ ] [Second Updated](https://youtube.com/watch?v=bbb)\n  > second updated";
 
         let result = replace_in_section_by_url(
             doc,
@@ -792,8 +827,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_frontmatter_adds_new_fields() {
-        use std::collections::HashMap;
         use serde_json::json;
+        use std::collections::HashMap;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let vault_path = temp_dir.path().to_path_buf();
@@ -855,8 +890,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_frontmatter_protected_keys_ignored() {
-        use std::collections::HashMap;
         use serde_json::json;
+        use std::collections::HashMap;
 
         let temp_dir = tempfile::tempdir().unwrap();
         let vault_path = temp_dir.path().to_path_buf();
@@ -907,11 +942,9 @@ mod tests {
         assert!(note_path.parent().unwrap().exists());
         assert!(note_path.starts_with(vault_path.join("Daily Notes")));
 
-        let expected_path = vault_path.join("Daily Notes").join(
-            Local::now()
-                .format("%Y/%m/%Y-%m-%d.md")
-                .to_string(),
-        );
+        let expected_path = vault_path
+            .join("Daily Notes")
+            .join(Local::now().format("%Y/%m/%Y-%m-%d.md").to_string());
         assert_eq!(note_path, expected_path);
     }
 }

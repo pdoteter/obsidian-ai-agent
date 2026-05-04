@@ -34,7 +34,10 @@ pub async fn handle_voice_message(
     // Check user authorization
     if let Some(user) = msg.from.as_ref() {
         if !config.is_user_allowed(user.id.0) {
-            info!(user_id = user.id.0, "Unauthorized user, ignoring voice message");
+            info!(
+                user_id = user.id.0,
+                "Unauthorized user, ignoring voice message"
+            );
             return Ok(());
         }
     }
@@ -48,46 +51,55 @@ pub async fn handle_voice_message(
         "Processing voice message"
     );
 
-    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+        .await?;
 
     // Step 1: Download voice to memory (Ogg Opus bytes)
-    let audio_bytes = download::download_voice_to_memory(&bot, &voice).await.map_err(|e| {
-        error!(error = %e, "Failed to download voice message");
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    let audio_bytes = download::download_voice_to_memory(&bot, &voice)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to download voice message");
+            Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+        })?;
 
     // Step 2: Transcribe via OpenAI Whisper (accepts .oga natively, no ffmpeg needed)
-    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+        .await?;
 
     let transcript = match whisper_client.transcribe(&audio_bytes).await {
         Ok(t) => t,
         Err(e) => {
             error!(error = %e, "Transcription failed");
-            bot.send_message(
-                msg.chat.id,
-                format!("❌ Transcription failed: {}", e),
-            )
-            .await?;
+            bot.send_message(msg.chat.id, format!("❌ Transcription failed: {}", e))
+                .await?;
             return Ok(());
         }
     };
 
-    info!(transcript_length = transcript.len(), "Transcription complete");
+    info!(
+        transcript_length = transcript.len(),
+        "Transcription complete"
+    );
     debug!(transcript = %transcript, "Full transcript");
 
     // Step 3: Classify the transcribed text
     let guide = crate::ai::guide::load_guide(&config.guide_path);
     let classified = match ai_client
-        .classify_text(&transcript, &config.openrouter_model_classify, guide.as_deref())
+        .classify_text(
+            &transcript,
+            &config.openrouter_model_classify,
+            guide.as_deref(),
+        )
         .await
     {
         Ok(c) => c,
         Err(e) => {
             error!(error = %e, "Classification failed, saving as raw log");
             let (section, content) = writer::format_raw_entry(&transcript);
-            vault.append_to_section(section, &content).await.map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            vault
+                .append_to_section(section, &content)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
             bot.send_message(
                 msg.chat.id,
                 format!(
@@ -105,16 +117,18 @@ pub async fn handle_voice_message(
 
     // Step 4: Write to vault
     let (section, content) = writer::format_for_daily_note(&classified);
-    vault.append_to_section(section, &content).await.map_err(|e| {
-        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-    })?;
+    vault
+        .append_to_section(section, &content)
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
     // Update frontmatter if AI provided any
     if let Some(ref frontmatter) = classified.frontmatter {
         if !frontmatter.is_empty() {
-            vault.update_frontmatter(frontmatter).await.map_err(|e| {
-                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-            })?;
+            vault
+                .update_frontmatter(frontmatter)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         }
     }
 

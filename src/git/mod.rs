@@ -1,4 +1,4 @@
-pub mod sync;
+pub mod chat_tracker;
 pub mod conflict;
 pub mod debounce;
-pub mod chat_tracker;
+pub mod sync;
