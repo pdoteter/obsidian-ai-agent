@@ -260,7 +260,7 @@ fn truncate_for_log(content: &str, max_len: usize) -> String {
     } else {
         format!(
             "{}...[truncated, {} total bytes]",
-            &content[..max_len],
+            crate::utils::safe_truncate(content, max_len),
             content.len()
         )
     }

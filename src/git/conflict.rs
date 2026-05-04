@@ -74,11 +74,7 @@ impl ConflictResolver {
         // Reserve: ~100 for header, ~200 for file list, ~800 for AI, ~100 for keyboard = 2800 remaining for diff
         let max_diff_len = 2500;
         let truncated_diff = if diff_preview.len() > max_diff_len {
-            let mut end = max_diff_len;
-            while !diff_preview.is_char_boundary(end) && end > 0 {
-                end -= 1;
-            }
-            format!("{}\n... (truncated)", &diff_preview[..end])
+            format!("{}\n... (truncated)", crate::utils::safe_truncate(&diff_preview, max_diff_len))
         } else {
             diff_preview.to_string()
         };
