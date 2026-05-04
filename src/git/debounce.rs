@@ -211,11 +211,7 @@ pub fn spawn_debounced_sync(
 
                                 // Prepare diff preview (truncate to 2500 chars)
                                 let diff_preview = if info.diff_output.len() > 2500 {
-                                    let mut end = 2500;
-                                    while !info.diff_output.is_char_boundary(end) && end > 0 {
-                                        end -= 1;
-                                    }
-                                    format!("{}... (truncated)", &info.diff_output[..end])
+                                    format!("{}... (truncated)", crate::utils::safe_truncate(&info.diff_output, 2500))
                                 } else {
                                     info.diff_output.clone()
                                 };

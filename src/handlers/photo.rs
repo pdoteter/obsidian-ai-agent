@@ -218,7 +218,8 @@ fn format_photo_content(
 
 fn generate_fallback_filename(date: &str) -> String {
     let safe_date = date.replace(['/', '\\'], "-");
-    let uuid_suffix = &uuid::Uuid::new_v4().to_string()[..4];
+    let uuid_str = uuid::Uuid::new_v4().to_string();
+    let uuid_suffix = crate::utils::safe_truncate(&uuid_str, 4);
     format!("{}-photo-{}.jpg", safe_date, uuid_suffix)
 }
 

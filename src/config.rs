@@ -337,6 +337,7 @@ pub enum LogAckMode {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
     use super::*;
 
     #[test]
@@ -469,6 +470,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_guide_path_resolves_relative_to_config() {
         // Verify guide_path is resolved relative to config file directory when relative
         use tempfile::tempdir;
@@ -517,6 +519,7 @@ git:
     }
 
     #[test]
+    #[serial]
     fn test_guide_path_absolute_unchanged() {
         // Verify absolute guide_path values are not modified
         use tempfile::tempdir;
@@ -562,6 +565,228 @@ git:
         env::remove_var("OPENAI_API_KEY");
         if let Some(path) = old_config_path {
             env::set_var("CONFIG_PATH", path);
+        }
+    }
+
+    fn setup_env() -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+        let old_config = env::var("CONFIG_PATH").ok();
+        let old_teloxide = env::var("TELOXIDE_TOKEN").ok();
+        let old_openrouter = env::var("OPENROUTER_API_KEY").ok();
+        let old_openai = env::var("OPENAI_API_KEY").ok();
+
+        env::remove_var("CONFIG_PATH");
+        env::remove_var("TELOXIDE_TOKEN");
+        env::remove_var("OPENROUTER_API_KEY");
+        env::remove_var("OPENAI_API_KEY");
+
+        (old_config, old_teloxide, old_openrouter, old_openai)
+    }
+
+    fn restore_env(old_env: (Option<String>, Option<String>, Option<String>, Option<String>)) {
+        let (old_config, old_teloxide, old_openrouter, old_openai) = old_env;
+        match old_config {
+            Some(v) => env::set_var("CONFIG_PATH", v),
+            None => env::remove_var("CONFIG_PATH"),
+        }
+        match old_teloxide {
+            Some(v) => env::set_var("TELOXIDE_TOKEN", v),
+            None => env::remove_var("TELOXIDE_TOKEN"),
+        }
+        match old_openrouter {
+            Some(v) => env::set_var("OPENROUTER_API_KEY", v),
+            None => env::remove_var("OPENROUTER_API_KEY"),
+        }
+        match old_openai {
+            Some(v) => env::set_var("OPENAI_API_KEY", v),
+            None => env::remove_var("OPENAI_API_KEY"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_success() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+git:
+  sync_enabled: false
+"#,
+                vault_dir.display()
+            ),
+        ).map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        let result = Config::load();
+
+        restore_env(old_env);
+
+        let config = result.map_err(|e| format!("Failed to load config: {:?}", e))?;
+        assert_eq!(config.teloxide_token, "test_teloxide");
+        assert_eq!(config.openrouter_api_key, "test_openrouter");
+        assert_eq!(config.openai_api_key, "test_openai");
+        assert_eq!(config.vault_path, vault_dir);
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_missing_env_vars() {
+        let old_env = setup_env();
+
+        // Test missing TELOXIDE_TOKEN
+        let result = Config::load();
+        assert!(matches!(result, Err(ConfigError::Missing("TELOXIDE_TOKEN"))));
+
+        // Test missing OPENROUTER_API_KEY
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        let result = Config::load();
+        assert!(matches!(result, Err(ConfigError::Missing("OPENROUTER_API_KEY"))));
+
+        // Test missing OPENAI_API_KEY
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        let result = Config::load();
+        assert!(matches!(result, Err(ConfigError::Missing("OPENAI_API_KEY"))));
+
+        restore_env(old_env);
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_missing_config_file() -> Result<(), String> {
+        let old_env = setup_env();
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        // Set CONFIG_PATH to a non-existent file
+        env::set_var("CONFIG_PATH", "/does/not/exist/config.yaml");
+
+        let result = Config::load();
+
+        restore_env(old_env);
+
+        match result {
+            Err(ConfigError::FileRead(path, _)) => {
+                assert_eq!(path, PathBuf::from("/does/not/exist/config.yaml"));
+                Ok(())
+            },
+            _ => Err("Expected ConfigError::FileRead".to_string()),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_invalid_config_yaml() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+
+        // Write invalid YAML
+        std::fs::write(&config_file, "invalid: yaml: content:").map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        let result = Config::load();
+
+        restore_env(old_env);
+
+        match result {
+            Err(ConfigError::Parse(path, _)) => {
+                assert_eq!(path, config_file);
+                Ok(())
+            },
+            _ => Err("Expected ConfigError::Parse".to_string()),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_invalid_vault_path() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+        let non_existent_vault = temp_dir.path().join("non_existent_vault");
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+git:
+  sync_enabled: false
+"#,
+                non_existent_vault.display()
+            ),
+        ).map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        let result = Config::load();
+
+        restore_env(old_env);
+
+        match result {
+            Err(ConfigError::InvalidPath(path)) => {
+                assert_eq!(path, non_existent_vault);
+                Ok(())
+            },
+            _ => Err("Expected ConfigError::InvalidPath".to_string()),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_config_load_missing_git_path_when_sync_enabled() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+git:
+  sync_enabled: true
+"#,
+                vault_dir.display()
+            ),
+        ).map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        let result = Config::load();
+
+        restore_env(old_env);
+
+        match result {
+            Err(ConfigError::MissingSetting("git.path (required when git.sync_enabled is true)")) => Ok(()),
+            _ => Err("Expected ConfigError::MissingSetting".to_string()),
         }
     }
 }

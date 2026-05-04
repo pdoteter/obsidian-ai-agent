@@ -153,13 +153,5 @@ pub async fn handle_voice_message(
 }
 
 fn truncate(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        let mut end = max_len;
-        while !s.is_char_boundary(end) && end > 0 {
-            end -= 1;
-        }
-        &s[..end]
-    }
+    crate::utils::safe_truncate(s, max_len)
 }

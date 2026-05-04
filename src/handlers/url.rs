@@ -232,7 +232,8 @@ pub async fn handle_url_message(
 
                 if let UrlType::YouTube { video_id } = &detected_url.url_type {
                     // Show button for manual transcript request (not keyword-triggered)
-                    let short_id = Uuid::new_v4().to_string()[..8].to_string();
+                    let uuid_str = Uuid::new_v4().to_string();
+                    let short_id = crate::utils::safe_truncate(&uuid_str, 8).to_string();
                     let title_for_request = fetched_title
                         .clone()
                         .unwrap_or_else(|| detected_url.url.clone());
@@ -567,12 +568,12 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
 
     // If no result lines found, just hard truncate the entire message
     if header_end_idx == 0 {
-        let mut result = confirmation;
-        if result.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-            result.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
+        if confirmation.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
+            let mut result = crate::utils::safe_truncate(&confirmation, TELEGRAM_MAX_MESSAGE_LENGTH - 3).to_string();
             result.push_str("...");
+            return result;
         }
-        return result;
+        return confirmation;
     }
 
     // Keep header, progressively remove result lines from the end
@@ -596,8 +597,9 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
 
     // Final safety: hard truncate if still too long
     if message.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-        message.truncate(TELEGRAM_MAX_MESSAGE_LENGTH - 3);
-        message.push_str("...");
+        let mut result = crate::utils::safe_truncate(&message, TELEGRAM_MAX_MESSAGE_LENGTH - 3).to_string();
+        result.push_str("...");
+        return result;
     }
 
     message

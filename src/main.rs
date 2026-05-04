@@ -6,6 +6,7 @@ mod git;
 mod handlers;
 mod image;
 mod url;
+mod utils;
 mod vault;
 
 use std::collections::HashMap;
