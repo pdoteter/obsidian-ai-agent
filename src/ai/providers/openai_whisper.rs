@@ -6,7 +6,7 @@ use tracing::{debug, info};
 
 use crate::ai::classify::ClassifiedNote;
 use crate::ai::summarize::UrlSummary;
-use crate::ai::AiProvider;
+use crate::ai::{AiProvider, ChatMessage};
 use crate::error::AiError;
 use crate::url::PageContent;
 
@@ -144,5 +144,16 @@ impl AiProvider for WhisperClient {
         _model: &str,
     ) -> Result<String, AiError> {
         Err(AiError::UnsupportedCapability("Transcript formatting not supported by Whisper provider".to_string()))
+    }
+
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: Vec<ChatMessage>,
+        _max_tokens: Option<u32>,
+    ) -> Result<String, AiError> {
+        Err(AiError::UnsupportedCapability(
+            "Whisper provider does not support chat completion".to_string(),
+        ))
     }
 }

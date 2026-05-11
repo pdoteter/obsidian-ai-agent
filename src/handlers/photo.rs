@@ -5,7 +5,7 @@ use teloxide::prelude::*;
 use teloxide::types::ChatAction;
 use tracing::{error, info};
 
-use crate::ai::client::OpenRouterClient;
+use crate::ai::AiService;
 use crate::config::Config;
 use crate::error::ImageError;
 use crate::git::chat_tracker::ChatIdTracker;
@@ -17,7 +17,7 @@ pub async fn handle_photo_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
@@ -88,7 +88,7 @@ pub async fn handle_photo_message(
 
     // 9. AI vision classification with guide
     let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-    let classified = ai_client
+    let classified = ai_service
         .classify_image(
             &base64,
             caption.as_deref(),

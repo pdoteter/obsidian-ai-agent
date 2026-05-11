@@ -208,4 +208,26 @@ impl AiProvider for OpenRouterClient {
 
         Ok(formatted_text)
     }
+
+    async fn chat_completion(
+        &self,
+        model: &str,
+        messages: Vec<crate::ai::ChatMessage>,
+        max_tokens: Option<u32>,
+    ) -> Result<String, AiError> {
+        let mut body = json!({
+            "model": model,
+            "messages": messages.into_iter().map(|m| json!({
+                "role": m.role,
+                "content": m.content
+            })).collect::<Vec<_>>()
+        });
+
+        if let Some(tokens) = max_tokens {
+            body["max_tokens"] = json!(tokens);
+        }
+
+        let response = self.chat_completion(&body).await?;
+        Self::extract_content(&response)
+    }
 }

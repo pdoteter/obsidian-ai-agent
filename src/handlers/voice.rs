@@ -4,8 +4,7 @@ use teloxide::types::ChatAction;
 
 use tracing::{debug, error, info};
 
-use crate::ai::client::OpenRouterClient;
-use crate::ai::transcribe::WhisperClient;
+use crate::ai::AiService;
 use crate::audio::download;
 use crate::config::Config;
 use crate::git::chat_tracker::ChatIdTracker;
@@ -13,14 +12,13 @@ use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 use crate::vault::writer;
 
-/// Handle incoming voice messages: download → transcribe (Whisper) → classify → write to vault
+/// Handle incoming voice messages: download → transcribe → classify → write to vault
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_voice_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
-    whisper_client: Arc<WhisperClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
@@ -62,11 +60,11 @@ pub async fn handle_voice_message(
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-    // Step 2: Transcribe via OpenAI Whisper (accepts .oga natively, no ffmpeg needed)
+    // Step 2: Transcribe via AiService
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
 
-    let transcript = match whisper_client.transcribe(&audio_bytes).await {
+    let transcript = match ai_service.transcribe(&audio_bytes).await {
         Ok(t) => t,
         Err(e) => {
             error!(error = %e, "Transcription failed");
@@ -84,7 +82,7 @@ pub async fn handle_voice_message(
 
     // Step 3: Classify the transcribed text
     let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-    let classified = match ai_client
+    let classified = match ai_service
         .classify_text(
             &transcript,
             &config.openrouter_model_classify,

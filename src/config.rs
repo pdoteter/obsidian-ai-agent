@@ -218,6 +218,37 @@ pub struct Config {
     pub ack: AckConfig,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            teloxide_token: String::new(),
+            openrouter_api_key: String::new(),
+            openai_api_key: String::new(),
+            vault_path: PathBuf::from("."),
+            git_sync_enabled: false,
+            git_path: None,
+            git_ssh_key_path: None,
+            git_remote_name: "origin".to_string(),
+            git_branch: "main".to_string(),
+            git_sync_debounce_secs: 60,
+            ai_provider: "openrouter".to_string(),
+            whisper_model: "whisper-1".to_string(),
+            whisper_language: None,
+            openrouter_model_classify: "google/gemini-2.5-flash".to_string(),
+            transcription: TranscriptionConfig::default(),
+            classification: TaskAiConfig::default(),
+            summarization: TaskAiConfig::default(),
+            allowed_user_ids: Vec::new(),
+            timezone: "UTC".to_string(),
+            date_display_format: "%Y-%m-%d".to_string(),
+            guide_path: None,
+            image: ImageConfig::default(),
+            url: UrlConfig::default(),
+            ack: AckConfig::default(),
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from YAML file (settings) + environment variables (secrets).
     ///

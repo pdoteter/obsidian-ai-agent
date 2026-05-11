@@ -252,7 +252,7 @@ async fn handle_callback(
     ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
-    chat_tracker: ChatIdTracker,
+    chat_tracker: chat_tracker::ChatIdTracker,
 ) -> HandlerResult {
     // Enforce same authorization policy as message handlers before processing callbacks.
     if !config.allowed_user_ids.is_empty() && !config.is_user_allowed(q.from.id.0) {
