@@ -66,10 +66,11 @@ pub async fn handle_text_message(
 
     info!(text_length = text.len(), "Processing text message");
 
-    bot.send_chat_action(msg.chat.id, ChatAction::Typing).await?;
+    bot.send_chat_action(msg.chat.id, ChatAction::Typing)
+        .await?;
 
     // Classify the text with AI
-    let guide = crate::ai::guide::load_guide(&config.guide_path);
+    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
     let classified = match ai_client
         .classify_text(&text, &config.openrouter_model_classify, guide.as_deref())
         .await
@@ -80,8 +81,11 @@ pub async fn handle_text_message(
             // Fallback: write as raw log entry
             let (section, content) = writer::format_raw_entry(&text);
             vault.append_to_section(section, &content).await?;
-            bot.send_message(msg.chat.id, format!("📝 Saved as raw log entry (AI unavailable: {})", e))
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("📝 Saved as raw log entry (AI unavailable: {})", e),
+            )
+            .await?;
             if let Some(ref notifier) = sync_notifier {
                 notifier.notify();
             }
@@ -155,7 +159,9 @@ async fn send_confirmation(
         NoteCategory::Log => send_log_acknowledgement(bot, msg, config).await,
         NoteCategory::Todo | NoteCategory::Note => {
             let confirmation = build_confirmation_message(classified);
-            bot.send_message(msg.chat.id, confirmation).await.map(|_| ())
+            bot.send_message(msg.chat.id, confirmation)
+                .await
+                .map(|_| ())
         }
     }
 }

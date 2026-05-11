@@ -55,7 +55,8 @@ impl OpenRouterClient {
         guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
         info!(text_length = text.len(), model = model, "Classifying text");
-        let system_prompt = crate::ai::guide::compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, guide);
+        let system_prompt =
+            crate::ai::guide::compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, guide);
 
         let body = build_text_request_body(text, model, &system_prompt);
         let classified = self.chat_completion_and_parse_classification(body).await?;
@@ -92,7 +93,8 @@ impl OpenRouterClient {
         );
         let system_prompt = crate::ai::guide::compose_system_prompt(&base_prompt, guide);
 
-        let body = build_image_request_body(image_base64, caption, exif_context, model, &system_prompt);
+        let body =
+            build_image_request_body(image_base64, caption, exif_context, model, &system_prompt);
         let classified = self.chat_completion_and_parse_classification(body).await?;
 
         info!(
@@ -260,7 +262,7 @@ fn truncate_for_log(content: &str, max_len: usize) -> String {
     } else {
         format!(
             "{}...[truncated, {} total bytes]",
-            &content[..max_len],
+            crate::utils::safe_truncate(content, max_len),
             content.len()
         )
     }
@@ -447,7 +449,10 @@ mod tests {
         });
 
         let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
-        assert!(note.frontmatter.is_none(), "frontmatter null should map to None");
+        assert!(
+            note.frontmatter.is_none(),
+            "frontmatter null should map to None"
+        );
     }
 
     #[test]
@@ -569,7 +574,8 @@ mod tests {
 
     #[test]
     fn test_build_text_request_body_includes_max_tokens() {
-        let body = build_text_request_body("test input", "google/gemini-2.5-flash", "system prompt");
+        let body =
+            build_text_request_body("test input", "google/gemini-2.5-flash", "system prompt");
         assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
     }
 
@@ -656,10 +662,16 @@ mod tests {
 
     #[test]
     fn test_unescape_json_string() {
-        assert_eq!(super::unescape_json_string(r#"line1\nline2"#), "line1\nline2");
+        assert_eq!(
+            super::unescape_json_string(r#"line1\nline2"#),
+            "line1\nline2"
+        );
         assert_eq!(super::unescape_json_string(r#"tab\there"#), "tab\there");
         assert_eq!(super::unescape_json_string(r#"quote\"here"#), "quote\"here");
-        assert_eq!(super::unescape_json_string(r#"backslash\\here"#), "backslash\\here");
+        assert_eq!(
+            super::unescape_json_string(r#"backslash\\here"#),
+            "backslash\\here"
+        );
     }
 
     #[test]

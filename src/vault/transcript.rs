@@ -98,12 +98,15 @@ mod tests {
         let transcript_folder = "transcripts";
         let date = "2026-03-25";
         let slug = "my-cool-video";
-        
+
         let expected_filename = format!("{}-{}.md", date, slug);
         let expected_path = vault_path.join(transcript_folder).join(&expected_filename);
-        
+
         // Path ends correctly (OS-agnostic)
-        assert!(expected_path.to_str().unwrap().ends_with("2026-03-25-my-cool-video.md"));
+        assert!(expected_path
+            .to_str()
+            .unwrap()
+            .ends_with("2026-03-25-my-cool-video.md"));
         assert!(expected_path.to_str().unwrap().contains("transcripts"));
     }
 
@@ -140,7 +143,7 @@ tags: [transcript, youtube]
         assert!(content.contains("video_id: dQw4w9WgXcQ"));
         assert!(content.contains("date: 2026-03-25"));
         assert!(content.contains("tags: [transcript, youtube]"));
-        
+
         // Verify structure
         assert!(content.contains("# Test Video"));
         assert!(content.contains("## Summary"));
@@ -155,7 +158,10 @@ tags: [transcript, youtube]
         assert_eq!(sanitize_slug("Video: Part 1 (2026)"), "video-part-1-2026");
         assert_eq!(sanitize_slug("Test@#$%Video"), "test-video");
         assert_eq!(sanitize_slug("multiple---dashes"), "multiple-dashes");
-        assert_eq!(sanitize_slug("  Leading and trailing  "), "leading-and-trailing");
+        assert_eq!(
+            sanitize_slug("  Leading and trailing  "),
+            "leading-and-trailing"
+        );
     }
 
     #[test]
@@ -164,9 +170,9 @@ tags: [transcript, youtube]
         let date = "2026-03-25";
         let slug = "my-video";
         let filename_without_ext = format!("{}-{}", date, slug);
-        
+
         let wiki_link = format!("[[{}/{}]]", transcript_folder, filename_without_ext);
-        
+
         assert_eq!(wiki_link, "[[transcripts/2026-03-25-my-video]]");
         assert!(!wiki_link.contains(".md"));
     }
@@ -176,13 +182,13 @@ tags: [transcript, youtube]
         // Test that function attempts directory creation
         let temp_dir = std::env::temp_dir().join("obsidian_test_transcript_dir");
         let transcript_folder = "test_transcripts";
-        
+
         // Clean up if exists
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-        
+
         // Create vault directory
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         let result = save_transcript(
             &temp_dir,
             transcript_folder,
@@ -193,13 +199,13 @@ tags: [transcript, youtube]
             "2026-03-25",
         )
         .await;
-        
+
         assert!(result.is_ok());
-        
+
         // Verify directory was created
         let transcript_dir = temp_dir.join(transcript_folder);
         assert!(transcript_dir.exists());
-        
+
         // Clean up
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -208,7 +214,7 @@ tags: [transcript, youtube]
     fn test_slug_truncation() {
         let long_title = "A".repeat(100);
         let slug = sanitize_slug(&long_title);
-        
+
         assert_eq!(slug.len(), 50);
         assert_eq!(slug, "a".repeat(50));
     }
@@ -217,13 +223,13 @@ tags: [transcript, youtube]
     async fn test_save_transcript_full_integration() {
         let temp_dir = std::env::temp_dir().join("obsidian_test_transcript_full");
         let transcript_folder = "transcripts";
-        
+
         // Clean up if exists
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-        
+
         // Create vault directory
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         let result = save_transcript(
             &temp_dir,
             transcript_folder,
@@ -234,22 +240,31 @@ tags: [transcript, youtube]
             "2026-03-25",
         )
         .await;
-        
+
         assert!(result.is_ok());
-        
+
         let transcript_file = result.unwrap();
-        
+
         // Verify path
-        assert!(transcript_file.path.to_str().unwrap().contains("2026-03-25-my-test-video.md"));
-        
+        assert!(transcript_file
+            .path
+            .to_str()
+            .unwrap()
+            .contains("2026-03-25-my-test-video.md"));
+
         // Verify wiki-link
-        assert_eq!(transcript_file.wiki_link, "[[transcripts/2026-03-25-my-test-video]]");
-        
+        assert_eq!(
+            transcript_file.wiki_link,
+            "[[transcripts/2026-03-25-my-test-video]]"
+        );
+
         // Verify file exists
         assert!(transcript_file.path.exists());
-        
+
         // Verify file content
-        let content = tokio::fs::read_to_string(&transcript_file.path).await.unwrap();
+        let content = tokio::fs::read_to_string(&transcript_file.path)
+            .await
+            .unwrap();
         assert!(content.contains("source: https://youtube.com/watch?v=dQw4w9WgXcQ"));
         assert!(content.contains("video_id: dQw4w9WgXcQ"));
         assert!(content.contains("date: 2026-03-25"));
@@ -259,7 +274,7 @@ tags: [transcript, youtube]
         assert!(content.contains("This is a summary."));
         assert!(content.contains("## Transcript"));
         assert!(content.contains("Full transcript text here."));
-        
+
         // Clean up
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -268,12 +283,12 @@ tags: [transcript, youtube]
     async fn test_special_characters_in_title() {
         let temp_dir = std::env::temp_dir().join("obsidian_test_transcript_special");
         let transcript_folder = "transcripts";
-        
+
         // Clean up if exists
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-        
+
         tokio::fs::create_dir_all(&temp_dir).await.unwrap();
-        
+
         let result = save_transcript(
             &temp_dir,
             transcript_folder,
@@ -284,19 +299,28 @@ tags: [transcript, youtube]
             "2026-03-25",
         )
         .await;
-        
+
         assert!(result.is_ok());
-        
+
         let transcript_file = result.unwrap();
-        
+
         // Verify slug sanitization
-        assert!(transcript_file.path.to_str().unwrap().contains("video-part-1-2026-special"));
-        assert_eq!(transcript_file.wiki_link, "[[transcripts/2026-03-25-video-part-1-2026-special]]");
-        
+        assert!(transcript_file
+            .path
+            .to_str()
+            .unwrap()
+            .contains("video-part-1-2026-special"));
+        assert_eq!(
+            transcript_file.wiki_link,
+            "[[transcripts/2026-03-25-video-part-1-2026-special]]"
+        );
+
         // Verify original title preserved in content
-        let content = tokio::fs::read_to_string(&transcript_file.path).await.unwrap();
+        let content = tokio::fs::read_to_string(&transcript_file.path)
+            .await
+            .unwrap();
         assert!(content.contains("# Video: Part 1 (2026) — Special!"));
-        
+
         // Clean up
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

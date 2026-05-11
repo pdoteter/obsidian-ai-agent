@@ -22,7 +22,7 @@ impl OpenRouterClient {
         );
 
         let guide_path = Some(PathBuf::from(DEFAULT_GUIDE_PATH));
-        let guide_content = load_guide(&guide_path).unwrap_or_default();
+        let guide_content = load_guide(&guide_path).await.unwrap_or_default();
         let body = build_transcript_format_body(model, video_title, raw_transcript, &guide_content);
 
         let response = self.chat_completion(body).await?;

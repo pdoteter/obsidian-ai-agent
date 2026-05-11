@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use tracing::{info, warn};
 
 /// Resolution strategy for a git conflict
@@ -54,12 +54,11 @@ impl ConflictResolver {
         let conflict_id = uuid::Uuid::new_v4().to_string();
 
         // Build message components
-        let mut message_parts = vec![
-            "⚠️ <b>Git Conflict Detected</b>\n".to_string(),
-        ];
+        let mut message_parts = vec!["⚠️ <b>Git Conflict Detected</b>\n".to_string()];
 
         // File list section
-        let files_display = conflicted_files.iter()
+        let files_display = conflicted_files
+            .iter()
             .map(|f| format!("  • {}", f))
             .collect::<Vec<_>>()
             .join("\n");
@@ -67,23 +66,25 @@ impl ConflictResolver {
 
         // AI analysis section (if available)
         if let Some(ref analysis) = ai_analysis {
-            message_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", escape_html(analysis)));
+            message_parts.push(format!(
+                "\n🤖 <b>AI Analysis:</b>\n{}\n",
+                escape_html(analysis)
+            ));
         }
 
         // Diff preview section (truncated to fit within Telegram's 4096 char limit)
         // Reserve: ~100 for header, ~200 for file list, ~800 for AI, ~100 for keyboard = 2800 remaining for diff
         let max_diff_len = 2500;
         let truncated_diff = if diff_preview.len() > max_diff_len {
-            let mut end = max_diff_len;
-            while !diff_preview.is_char_boundary(end) && end > 0 {
-                end -= 1;
-            }
-            format!("{}\n... (truncated)", &diff_preview[..end])
+            format!("{}\n... (truncated)", crate::utils::safe_truncate(&diff_preview, max_diff_len))
         } else {
             diff_preview.to_string()
         };
 
-        message_parts.push(format!("\n<b>Diff preview:</b>\n<pre>{}</pre>\n", escape_html(&truncated_diff)));
+        message_parts.push(format!(
+            "\n<b>Diff preview:</b>\n<pre>{}</pre>\n",
+            escape_html(&truncated_diff)
+        ));
 
         let keyboard = InlineKeyboardMarkup::new(vec![vec![
             InlineKeyboardButton::callback(
@@ -94,10 +95,7 @@ impl ConflictResolver {
                 "📥 Use server version (Theirs)",
                 format!("conflict:{}:theirs", conflict_id),
             ),
-            InlineKeyboardButton::callback(
-                "❌ Abort",
-                format!("conflict:{}:abort", conflict_id),
-            ),
+            InlineKeyboardButton::callback("❌ Abort", format!("conflict:{}:abort", conflict_id)),
         ]]);
 
         let full_message = message_parts.join("");
@@ -105,7 +103,10 @@ impl ConflictResolver {
         // Check if message fits within Telegram's 4096 char limit
         if full_message.len() > 4096 {
             // Send diff preview as separate message first, then send resolution message without diff
-            let diff_msg = format!("<b>Diff preview:</b>\n<pre>{}</pre>", escape_html(&truncated_diff));
+            let diff_msg = format!(
+                "<b>Diff preview:</b>\n<pre>{}</pre>",
+                escape_html(&truncated_diff)
+            );
             self.bot
                 .send_message(chat_id, diff_msg)
                 .parse_mode(ParseMode::Html)
@@ -117,7 +118,10 @@ impl ConflictResolver {
                 format!("\n<b>Conflicting files:</b>\n{}\n", files_display),
             ];
             if let Some(analysis) = ai_analysis {
-                simple_parts.push(format!("\n🤖 <b>AI Analysis:</b>\n{}\n", escape_html(&analysis)));
+                simple_parts.push(format!(
+                    "\n🤖 <b>AI Analysis:</b>\n{}\n",
+                    escape_html(&analysis)
+                ));
             }
             simple_parts.push("\n(See diff above)".to_string());
             let simple_message = simple_parts.join("");

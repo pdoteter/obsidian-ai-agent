@@ -25,52 +25,42 @@ pub fn extract_exif(bytes: &[u8]) -> ExifData {
     let reader = exif::Reader::new();
     let mut cursor = Cursor::new(bytes);
 
-    match reader.read_from_container(&mut cursor) {
-        Ok(exif_data) => {
-            let mut result = ExifData::default();
+    let exif_data = match reader.read_from_container(&mut cursor) {
+        Ok(data) => data,
+        Err(_) => return ExifData::default(),
+    };
 
-            // Extract DateTimeOriginal tag
-            if let Some(date_field) =
-                exif_data.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
-            {
-                if let exif::Value::Ascii(ref vec) = date_field.value {
-                    if let Some(date_bytes) = vec.first() {
-                        if let Ok(date_str) = std::str::from_utf8(date_bytes) {
-                            result.date_taken = Some(date_str.to_string());
-                        }
-                    }
-                }
-            }
+    let mut result = ExifData::default();
 
-            // Extract GPS Latitude
-            if let Some(lat_field) = exif_data.get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
-            {
-                if let exif::Value::Rational(ref vec) = lat_field.value {
-                    if let Some(rational) = vec.first() {
-                        let lat = rational.num as f64 / rational.denom as f64;
-                        result.gps_lat = Some(lat);
-                    }
-                }
-            }
+    // Extract DateTimeOriginal tag
+    result.date_taken = exif_data
+        .get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
+        .and_then(|f| match &f.value {
+            exif::Value::Ascii(vec) => vec.first(),
+            _ => None,
+        })
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .map(|s| s.to_string());
 
-            // Extract GPS Longitude
-            if let Some(lon_field) = exif_data.get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
-            {
-                if let exif::Value::Rational(ref vec) = lon_field.value {
-                    if let Some(rational) = vec.first() {
-                        let lon = rational.num as f64 / rational.denom as f64;
-                        result.gps_lon = Some(lon);
-                    }
-                }
-            }
+    // Extract GPS Latitude
+    result.gps_lat = exif_data
+        .get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
+        .and_then(|f| match &f.value {
+            exif::Value::Rational(vec) => vec.first(),
+            _ => None,
+        })
+        .map(|r| r.num as f64 / r.denom as f64);
 
-            result
-        }
-        Err(_) => {
-            // Any parsing error → return empty result (best-effort)
-            ExifData::default()
-        }
-    }
+    // Extract GPS Longitude
+    result.gps_lon = exif_data
+        .get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
+        .and_then(|f| match &f.value {
+            exif::Value::Rational(vec) => vec.first(),
+            _ => None,
+        })
+        .map(|r| r.num as f64 / r.denom as f64);
+
+    result
 }
 
 /// Format EXIF data for inclusion in AI context.

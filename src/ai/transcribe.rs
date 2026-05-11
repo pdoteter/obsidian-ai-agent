@@ -48,7 +48,9 @@ impl WhisperClient {
         let file_part = reqwest::multipart::Part::bytes(audio_bytes.to_vec())
             .file_name("audio.ogg")
             .mime_str("audio/ogg")
-            .map_err(|e| AiError::TranscriptionFailed(format!("Failed to build multipart: {}", e)))?;
+            .map_err(|e| {
+                AiError::TranscriptionFailed(format!("Failed to build multipart: {}", e))
+            })?;
 
         let mut form = reqwest::multipart::Form::new()
             .text("model", self.model.clone())

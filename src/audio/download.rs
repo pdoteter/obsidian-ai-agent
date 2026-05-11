@@ -19,10 +19,9 @@ pub async fn download_voice(
         .map_err(|e| AudioError::Download(e.to_string()))?;
 
     let tmp_dir = TempDir::new()?;
-    let file_path = tmp_dir.path().join(format!(
-        "voice_{}.oga",
-        uuid::Uuid::new_v4()
-    ));
+    let file_path = tmp_dir
+        .path()
+        .join(format!("voice_{}.oga", uuid::Uuid::new_v4()));
 
     let mut dst = tokio::fs::File::create(&file_path).await?;
     bot.download_file(&file.path, &mut dst)
@@ -41,10 +40,7 @@ pub async fn download_voice(
 
 /// Downloads a voice message to an in-memory buffer.
 #[allow(dead_code)]
-pub async fn download_voice_to_memory(
-    bot: &Bot,
-    voice: &Voice,
-) -> Result<Vec<u8>, AudioError> {
+pub async fn download_voice_to_memory(bot: &Bot, voice: &Voice) -> Result<Vec<u8>, AudioError> {
     use futures::StreamExt;
 
     let file = bot

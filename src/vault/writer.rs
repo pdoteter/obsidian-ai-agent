@@ -377,4 +377,72 @@ mod tests {
         // Verify line count (title + summary + tags = 3 lines)
         assert_eq!(content.lines().count(), 3);
     }
+
+    #[test]
+    fn test_format_note() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Note,
+            markdown: "Just a thought about Rust.".to_string(),
+            tags: vec!["rust".to_string()],
+            summary: "Rust thought".to_string(),
+            frontmatter: None,
+        };
+
+        let (section, content) = format_for_daily_note(&note);
+        assert_eq!(section, "## 📝 Notes");
+        assert_eq!(content, "Just a thought about Rust. #rust");
+    }
+
+    #[test]
+    fn test_format_note_multiple_tags() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Note,
+            markdown: "Multiple tags test.".to_string(),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            summary: "test".to_string(),
+            frontmatter: None,
+        };
+
+        let (section, content) = format_for_daily_note(&note);
+        assert_eq!(section, "## 📝 Notes");
+        assert_eq!(content, "Multiple tags test. #tag1 #tag2");
+    }
+
+    #[test]
+    fn test_format_log_strips_dash() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Log,
+            markdown: "- Already has a dash".to_string(),
+            tags: vec![],
+            summary: "dash test".to_string(),
+            frontmatter: None,
+        };
+
+        let (_section, content) = format_for_daily_note(&note);
+        // Should NOT have double dash like "- HH:MM — - Already has a dash"
+        assert!(content.contains(" — Already has a dash"));
+        assert!(!content.contains(" — - Already has a dash"));
+    }
+
+    #[test]
+    fn test_format_raw_entry() {
+        let (section, content) = format_raw_entry("Manual log entry");
+        assert_eq!(section, "## 📋 Log");
+        assert!(content.contains(" — Manual log entry"));
+        assert!(content.starts_with("- "));
+    }
+
+    #[test]
+    fn test_format_no_tags() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Note,
+            markdown: "No tags here.".to_string(),
+            tags: vec![],
+            summary: "no tags".to_string(),
+            frontmatter: None,
+        };
+
+        let (_section, content) = format_for_daily_note(&note);
+        assert_eq!(content, "No tags here.");
+    }
 }
