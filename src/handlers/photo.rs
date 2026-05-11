@@ -87,7 +87,7 @@ pub async fn handle_photo_message(
     let base64 = crate::image::process::encode_base64(&resized);
 
     // 9. AI vision classification with guide
-    let guide = crate::ai::guide::load_guide(&config.guide_path);
+    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
     let classified = ai_client
         .classify_image(
             &base64,
