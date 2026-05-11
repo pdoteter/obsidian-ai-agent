@@ -6,6 +6,10 @@ use tempfile::TempDir;
 use tokio::process::Command;
 use tracing::{info, warn};
 
+/// Regex to validate YouTube video ID (11 characters, alphanumeric, underscores, or hyphens)
+static VIDEO_ID_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{11}$").expect("Video ID regex is valid"));
+
 /// Fetch YouTube transcript for a video using yt-dlp CLI.
 ///
 /// This function shells out to yt-dlp to download English auto-generated captions
@@ -20,6 +24,14 @@ use tracing::{info, warn};
 /// # Errors
 /// * `UrlError::TranscriptFailed` - yt-dlp not found, no captions available, or command failed
 pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
+    // Security: strictly validate video_id to prevent argument injection
+    if !VIDEO_ID_REGEX.is_match(video_id) {
+        return Err(UrlError::TranscriptFailed {
+            video_id: video_id.to_string(),
+            reason: "Invalid video ID format".to_string(),
+        });
+    }
+
     let url = format!("https://youtube.com/watch?v={}", video_id);
 
     info!(video_id, "Fetching transcript via yt-dlp");
@@ -43,6 +55,7 @@ pub async fn fetch_transcript(video_id: &str) -> Result<String, UrlError> {
             "--no-warnings",
             "-o",
             &output_template,
+            "--",
             &url,
         ])
         .output()
@@ -210,7 +223,7 @@ mod tests {
     #[tokio::test]
     async fn test_ytdlp_command_construction() {
         // This test verifies the function exists and has the correct signature.
-        // We test with an invalid video ID to check the command construction path.
+        // We test with a valid video ID format to check the command construction path.
         // Real execution would require yt-dlp to be installed.
         let result = fetch_transcript("test_video_id").await;
 
@@ -218,11 +231,35 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(UrlError::TranscriptFailed { video_id, reason }) = result {
-            assert_eq!(video_id, "test_video_id");
+            assert_eq!(video_id, "dQw4w9WgXcQ");
             // Reason should mention either "yt-dlp not found" or some other error
             assert!(!reason.is_empty());
         } else {
             panic!("Expected UrlError::TranscriptFailed");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_transcript_invalid_id() {
+        let invalid_ids = vec![
+            "short",
+            "too_long_video_id",
+            "with spaces ",
+            "semicolon;",
+            "slash/path",
+            "back\\slash",
+            "quote'n",
+            "dash-und_12", // 12 chars
+        ];
+
+        for id in invalid_ids {
+            let result = fetch_transcript(id).await;
+            assert!(result.is_err(), "ID '{}' should be rejected", id);
+            if let Err(UrlError::TranscriptFailed { reason, .. }) = result {
+                assert_eq!(reason, "Invalid video ID format");
+            } else {
+                panic!("Expected UrlError::TranscriptFailed for ID '{}'", id);
+            }
         }
     }
 
