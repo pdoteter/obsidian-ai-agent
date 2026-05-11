@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::info;
 
-use crate::ai::client::OpenRouterClient;
 use crate::error::AiError;
 use crate::url::PageContent;
 
@@ -14,52 +12,7 @@ pub struct UrlSummary {
     pub tags: Vec<String>,
 }
 
-impl OpenRouterClient {
-    pub async fn summarize_url(
-        &self,
-        page_content: &PageContent,
-        user_text: Option<&str>,
-        model: &str,
-        guide: Option<&str>,
-    ) -> Result<UrlSummary, AiError> {
-        info!(
-            url = %page_content.url,
-            body_length = page_content.body_text.len(),
-            model = model,
-            "Summarizing URL content"
-        );
-
-        let system_prompt =
-            crate::ai::guide::compose_system_prompt(url_summary_system_prompt(), guide);
-        let body = build_url_request_body(page_content, user_text, model, &system_prompt);
-        let summarized = self.chat_completion_and_parse_url_summary(body).await?;
-
-        info!(
-            title = %summarized.title,
-            tags = ?summarized.tags,
-            "URL content summarized"
-        );
-
-        Ok(summarized)
-    }
-
-    async fn chat_completion_and_parse_url_summary(
-        &self,
-        body: serde_json::Value,
-    ) -> Result<UrlSummary, AiError> {
-        let response = self.chat_completion(&body).await?;
-        let content = Self::extract_content(&response)?;
-
-        serde_json::from_str(&content).map_err(|e| {
-            AiError::ClassificationFailed(format!(
-                "Failed to parse URL summary JSON: {}. Raw: {}",
-                e, content
-            ))
-        })
-    }
-}
-
-fn url_summary_response_format() -> serde_json::Value {
+pub fn url_summary_response_format() -> serde_json::Value {
     json!({
         "type": "json_schema",
         "json_schema": {
@@ -89,7 +42,7 @@ fn url_summary_response_format() -> serde_json::Value {
     })
 }
 
-fn build_url_request_body(
+pub fn build_url_request_body(
     page_content: &PageContent,
     user_text: Option<&str>,
     model: &str,
@@ -128,7 +81,7 @@ fn build_url_user_prompt(page_content: &PageContent, user_text: Option<&str>) ->
     )
 }
 
-fn url_summary_system_prompt() -> &'static str {
+pub fn url_summary_system_prompt() -> &'static str {
     "Analyze this web page content and optional user context. Produce: concise title (5-10 words), summary (2-3 sentences), relevant tags (3-5)."
 }
 

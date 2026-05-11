@@ -1,9 +1,14 @@
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 use tracing::{debug, info};
 
+use crate::ai::classify::ClassifiedNote;
+use crate::ai::summarize::UrlSummary;
+use crate::ai::AiProvider;
 use crate::error::AiError;
+use crate::url::PageContent;
 
 const WHISPER_API_URL: &str = "https://api.openai.com/v1/audio/transcriptions";
 const REQUEST_TIMEOUT_SECS: u64 = 120;
@@ -35,9 +40,41 @@ impl WhisperClient {
             language,
         })
     }
+}
 
-    /// Transcribe raw audio bytes (Ogg Opus) using OpenAI Whisper API.
-    pub async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String, AiError> {
+#[async_trait]
+impl AiProvider for WhisperClient {
+    async fn classify_text(
+        &self,
+        _text: &str,
+        _model: &str,
+        _guide: Option<&str>,
+    ) -> Result<ClassifiedNote, AiError> {
+        Err(AiError::UnsupportedCapability("Classification not supported by Whisper provider".to_string()))
+    }
+
+    async fn classify_image(
+        &self,
+        _image_base64: &str,
+        _caption: Option<&str>,
+        _exif_context: &str,
+        _model: &str,
+        _guide: Option<&str>,
+    ) -> Result<ClassifiedNote, AiError> {
+        Err(AiError::UnsupportedCapability("Image classification not supported by Whisper provider".to_string()))
+    }
+
+    async fn summarize_url(
+        &self,
+        _page_content: &PageContent,
+        _user_text: Option<&str>,
+        _model: &str,
+        _guide: Option<&str>,
+    ) -> Result<UrlSummary, AiError> {
+        Err(AiError::UnsupportedCapability("URL summarization not supported by Whisper provider".to_string()))
+    }
+
+    async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String, AiError> {
         info!(
             audio_size_bytes = audio_bytes.len(),
             model = %self.model,
@@ -72,7 +109,7 @@ impl WhisperClient {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AiError::ApiError {
+            return Err(AiError::ProviderError {
                 status: status.as_u16(),
                 message: error_text,
             });
@@ -98,5 +135,14 @@ impl WhisperClient {
         debug!(transcript = %transcript, "Transcription result");
 
         Ok(transcript)
+    }
+
+    async fn format_transcript(
+        &self,
+        _raw_transcript: &str,
+        _video_title: &str,
+        _model: &str,
+    ) -> Result<String, AiError> {
+        Err(AiError::UnsupportedCapability("Transcript formatting not supported by Whisper provider".to_string()))
     }
 }

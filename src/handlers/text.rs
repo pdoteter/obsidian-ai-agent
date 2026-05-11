@@ -4,7 +4,7 @@ use teloxide::types::{ChatAction, ReactionType};
 use tracing::{error, info};
 
 use crate::ai::classify::{ClassifiedNote, NoteCategory};
-use crate::ai::client::OpenRouterClient;
+use crate::ai::AiService;
 use crate::config::{Config, LogAckMode};
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
@@ -18,7 +18,7 @@ pub async fn handle_text_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
@@ -50,7 +50,7 @@ pub async fn handle_text_message(
             bot,
             msg,
             config,
-            ai_client,
+            ai_service,
             vault,
             sync_notifier,
             chat_tracker,
@@ -71,7 +71,7 @@ pub async fn handle_text_message(
 
     // Classify the text with AI
     let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-    let classified = match ai_client
+    let classified = match ai_service
         .classify_text(&text, &config.openrouter_model_classify, guide.as_deref())
         .await
     {
