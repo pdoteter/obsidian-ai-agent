@@ -116,9 +116,8 @@ impl OpenRouterClient {
         let mut last_error: Option<serde_json::Error> = None;
 
         for attempt in 0..=MAX_PARSE_RETRIES {
-            let response = self.chat_completion(body.clone()).await?;
+            let response = self.chat_completion(&body).await?;
             let content = Self::extract_content(&response)?;
-            last_content = content.clone();
 
             match serde_json::from_str::<ClassifiedNote>(&content) {
                 Ok(classified) => return Ok(classified),
@@ -126,7 +125,8 @@ impl OpenRouterClient {
                     last_error = Some(e);
 
                     // Check if this looks like a truncated response
-                    if is_truncated_json(&content) && attempt < MAX_PARSE_RETRIES {
+                    let is_truncated = is_truncated_json(&content);
+                    if is_truncated && attempt < MAX_PARSE_RETRIES {
                         warn!(
                             attempt = attempt + 1,
                             content_len = content.len(),
@@ -137,6 +137,8 @@ impl OpenRouterClient {
                         backoff *= 2;
                         continue;
                     }
+
+                    last_content = content;
                 }
             }
         }

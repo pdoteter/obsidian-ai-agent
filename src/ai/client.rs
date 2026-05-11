@@ -28,7 +28,7 @@ impl OpenRouterClient {
     }
 
     /// Make a chat completion request with automatic retry on rate limits and server errors
-    pub async fn chat_completion(&self, body: Value) -> Result<Value, AiError> {
+    pub async fn chat_completion(&self, body: &Value) -> Result<Value, AiError> {
         let mut backoff = Duration::from_secs(1);
 
         for attempt in 0..=MAX_RETRIES {

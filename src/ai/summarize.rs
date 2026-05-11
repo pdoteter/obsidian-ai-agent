@@ -47,7 +47,7 @@ impl OpenRouterClient {
         &self,
         body: serde_json::Value,
     ) -> Result<UrlSummary, AiError> {
-        let response = self.chat_completion(body).await?;
+        let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
 
         serde_json::from_str(&content).map_err(|e| {

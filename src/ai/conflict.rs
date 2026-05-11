@@ -127,7 +127,7 @@ pub async fn analyze_conflict(
         "max_tokens": 512
     });
 
-    let response = client.chat_completion(body).await?;
+    let response = client.chat_completion(&body).await?;
     let text = OpenRouterClient::extract_content(&response)?;
     Ok(parse_analysis_response(&text))
 }

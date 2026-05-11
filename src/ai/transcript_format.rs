@@ -25,7 +25,7 @@ impl OpenRouterClient {
         let guide_content = load_guide(&guide_path).unwrap_or_default();
         let body = build_transcript_format_body(model, video_title, raw_transcript, &guide_content);
 
-        let response = self.chat_completion(body).await?;
+        let response = self.chat_completion(&body).await?;
         let formatted_text = Self::extract_content(&response)?;
 
         debug!(
