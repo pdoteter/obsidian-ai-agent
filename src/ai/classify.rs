@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
@@ -191,8 +192,16 @@ fn is_truncated_json(content: &str) -> bool {
 fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
     use regex::Regex;
 
+    static CATEGORY_RE: OnceLock<Regex> = OnceLock::new();
+    static MARKDOWN_RE: OnceLock<Regex> = OnceLock::new();
+    static SUMMARY_RE: OnceLock<Regex> = OnceLock::new();
+    static TAGS_RE: OnceLock<Regex> = OnceLock::new();
+    static TAG_ITEM_RE: OnceLock<Regex> = OnceLock::new();
+
     // Try to extract category (required)
-    let category_re = Regex::new(r#""category"\s*:\s*"(todo|log|note)""#).ok()?;
+    let category_re = CATEGORY_RE.get_or_init(|| {
+        Regex::new(r#""category"\s*:\s*"(todo|log|note)""#).expect("Invalid category regex")
+    });
     let category_match = category_re.captures(content)?;
     let category_str = category_match.get(1)?.as_str();
 
@@ -204,7 +213,9 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
     };
 
     // Try to extract markdown (required for useful output)
-    let markdown_re = Regex::new(r#""markdown"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).ok()?;
+    let markdown_re = MARKDOWN_RE.get_or_init(|| {
+        Regex::new(r#""markdown"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).expect("Invalid markdown regex")
+    });
     let markdown = markdown_re
         .captures(content)
         .and_then(|c| c.get(1))
@@ -212,7 +223,9 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
         .unwrap_or_else(|| "[Content extraction failed]".to_string());
 
     // Try to extract summary
-    let summary_re = Regex::new(r#""summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).ok()?;
+    let summary_re = SUMMARY_RE.get_or_init(|| {
+        Regex::new(r#""summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).expect("Invalid summary regex")
+    });
     let summary = summary_re
         .captures(content)
         .and_then(|c| c.get(1))
@@ -220,12 +233,14 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
         .unwrap_or_else(|| "Extracted from partial response".to_string());
 
     // Try to extract tags (optional)
-    let tags_re = Regex::new(r#""tags"\s*:\s*\[([^\]]*)\]"#).ok()?;
+    let tags_re = TAGS_RE
+        .get_or_init(|| Regex::new(r#""tags"\s*:\s*\[([^\]]*)\]"#).expect("Invalid tags regex"));
     let tags = tags_re
         .captures(content)
         .and_then(|c| c.get(1))
         .and_then(|m| {
-            let tag_item_re = Regex::new(r#""([^"]+)""#).ok()?;
+            let tag_item_re = TAG_ITEM_RE
+                .get_or_init(|| Regex::new(r#""([^"]+)""#).expect("Invalid tag item regex"));
             Some(
                 tag_item_re
                     .captures_iter(m.as_str())
