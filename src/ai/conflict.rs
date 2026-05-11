@@ -1,7 +1,6 @@
-use serde_json::json;
 use tracing::{info, warn};
 
-use super::client::OpenRouterClient;
+use crate::ai::{AiService, ChatMessage};
 use crate::error::AiError;
 
 /// Result of AI analyzing a single conflicted file
@@ -90,7 +89,7 @@ pub fn parse_analysis_response(text: &str) -> ConflictAnalysis {
 
 /// Analyze a single conflicted file using AI
 pub async fn analyze_conflict(
-    client: &OpenRouterClient,
+    ai_service: &AiService,
     model: &str,
     file_name: &str,
     ours_content: &str,
@@ -118,24 +117,19 @@ pub async fn analyze_conflict(
         diff = truncate_content(diff, 1000),
     );
 
-    let body = json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": system_prompt },
-            { "role": "user", "content": user_prompt }
-        ],
-        "max_tokens": 512
-    });
+    let messages = vec![
+        ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
+        ChatMessage { role: "user".to_string(), content: user_prompt }
+    ];
 
-    let response = client.chat_completion(&body).await?;
-    let text = OpenRouterClient::extract_content(&response)?;
+    let text = ai_service.chat_completion(model, messages, Some(512)).await?;
     Ok(parse_analysis_response(&text))
 }
 
 /// Analyze all conflicts in a ConflictInfo and return a combined human-readable analysis string.
 /// This is the main entry point called from the debounce loop.
 pub async fn analyze_conflicts(
-    client: &OpenRouterClient,
+    ai_service: &AiService,
     model: &str,
     conflict_info: &crate::git::sync::ConflictInfo,
 ) -> Result<String, AiError> {
@@ -160,7 +154,7 @@ pub async fn analyze_conflicts(
         info!(file = %file_name, "Analyzing conflict");
 
         match analyze_conflict(
-            client,
+            ai_service,
             model,
             file_name,
             ours,

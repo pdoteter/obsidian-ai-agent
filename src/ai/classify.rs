@@ -2,15 +2,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing::{info, warn};
+use tracing::{warn};
 
-use super::client::OpenRouterClient;
 use crate::error::AiError;
 
 /// Maximum retries for JSON parse failures (truncated responses)
-const MAX_PARSE_RETRIES: u32 = 2;
+pub const MAX_PARSE_RETRIES: u32 = 2;
 
 /// The category assigned to a piece of text by the AI
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -47,124 +44,32 @@ pub struct ClassifiedNote {
     pub frontmatter: Option<HashMap<String, serde_json::Value>>,
 }
 
-impl OpenRouterClient {
-    /// Classify text into a structured note (todo/log/note) with formatted markdown.
-    pub async fn classify_text(
-        &self,
-        text: &str,
-        model: &str,
-        guide: Option<&str>,
-    ) -> Result<ClassifiedNote, AiError> {
-        info!(text_length = text.len(), model = model, "Classifying text");
-        let system_prompt =
-            crate::ai::guide::compose_system_prompt(CLASSIFICATION_SYSTEM_PROMPT, guide);
-
-        let body = build_text_request_body(text, model, &system_prompt);
-        let classified = self.chat_completion_and_parse_classification(body).await?;
-
-        info!(
-            category = %classified.category,
-            tags = ?classified.tags,
-            summary = %classified.summary,
-            "Text classified"
-        );
-
-        Ok(classified)
-    }
-
-    /// Classify an image using vision API (multimodal)
-    pub async fn classify_image(
-        &self,
-        image_base64: &str,
-        caption: Option<&str>,
-        exif_context: &str,
-        model: &str,
-        guide: Option<&str>,
-    ) -> Result<ClassifiedNote, AiError> {
-        info!(
-            caption_length = caption.map(|s| s.len()).unwrap_or(0),
-            has_exif = !exif_context.is_empty(),
-            model = model,
-            "Classifying image"
-        );
-
-        let base_prompt = format!(
-            "{}\n\nYou are also receiving an image. Describe what you see and classify it. If a caption is provided, use it as primary context. Include the image description in the markdown output as a short paragraph.",
-            CLASSIFICATION_SYSTEM_PROMPT
-        );
-        let system_prompt = crate::ai::guide::compose_system_prompt(&base_prompt, guide);
-
-        let body =
-            build_image_request_body(image_base64, caption, exif_context, model, &system_prompt);
-        let classified = self.chat_completion_and_parse_classification(body).await?;
-
-        info!(
-            category = %classified.category,
-            tags = ?classified.tags,
-            summary = %classified.summary,
-            "Image classified"
-        );
-
-        Ok(classified)
-    }
-
-    async fn chat_completion_and_parse_classification(
-        &self,
-        body: serde_json::Value,
-    ) -> Result<ClassifiedNote, AiError> {
-        let mut backoff = Duration::from_millis(500);
-        let mut last_content = String::new();
-        let mut last_error: Option<serde_json::Error> = None;
-
-        for attempt in 0..=MAX_PARSE_RETRIES {
-            let response = self.chat_completion(&body).await?;
-            let content = Self::extract_content(&response)?;
-
-            match serde_json::from_str::<ClassifiedNote>(&content) {
-                Ok(classified) => return Ok(classified),
-                Err(e) => {
-                    last_error = Some(e);
-
-                    // Check if this looks like a truncated response
-                    let is_truncated = is_truncated_json(&content);
-                    if is_truncated && attempt < MAX_PARSE_RETRIES {
-                        warn!(
-                            attempt = attempt + 1,
-                            content_len = content.len(),
-                            content_preview = truncate_for_log(&content, 100),
-                            "Truncated JSON response, retrying"
-                        );
-                        sleep(backoff).await;
-                        backoff *= 2;
-                        continue;
-                    }
-
-                    last_content = content;
-                }
+/// Robust classification parsing with fallback for truncated responses
+pub fn parse_classification_with_fallback(content: &str) -> Result<ClassifiedNote, AiError> {
+    match serde_json::from_str::<ClassifiedNote>(content) {
+        Ok(classified) => Ok(classified),
+        Err(e) => {
+            // All retries failed - try fallback extraction
+            if let Some(fallback) = try_extract_partial_classification(content) {
+                warn!(
+                    content_preview = truncate_for_log(content, 200),
+                    "Used fallback extraction for partial JSON"
+                );
+                return Ok(fallback);
             }
-        }
 
-        // All retries failed - try fallback extraction
-        if let Some(fallback) = try_extract_partial_classification(&last_content) {
-            warn!(
-                content_preview = truncate_for_log(&last_content, 200),
-                "Used fallback extraction for partial JSON"
-            );
-            return Ok(fallback);
+            // Complete failure
+            Err(AiError::ClassificationFailed(format!(
+                "Failed to parse classification JSON: {}. Raw: {}",
+                e,
+                truncate_for_log(content, 500)
+            )))
         }
-
-        // Complete failure
-        Err(AiError::ClassificationFailed(format!(
-            "Failed to parse classification JSON after {} retries: {}. Raw: {}",
-            MAX_PARSE_RETRIES + 1,
-            last_error.map(|e| e.to_string()).unwrap_or_default(),
-            truncate_for_log(&last_content, 500)
-        )))
     }
 }
 
 /// Check if a JSON string appears to be truncated/incomplete
-fn is_truncated_json(content: &str) -> bool {
+pub fn is_truncated_json(content: &str) -> bool {
     let trimmed = content.trim();
 
     // Empty or very short response
@@ -273,7 +178,7 @@ fn unescape_json_string(s: &str) -> String {
 }
 
 /// Truncate content for logging to avoid huge log entries
-fn truncate_for_log(content: &str, max_len: usize) -> String {
+pub fn truncate_for_log(content: &str, max_len: usize) -> String {
     if content.len() <= max_len {
         content.to_string()
     } else {
@@ -285,7 +190,7 @@ fn truncate_for_log(content: &str, max_len: usize) -> String {
     }
 }
 
-fn classified_note_response_format() -> serde_json::Value {
+pub fn classified_note_response_format() -> serde_json::Value {
     json!({
         "type": "json_schema",
         "json_schema": {
@@ -325,7 +230,7 @@ fn classified_note_response_format() -> serde_json::Value {
     })
 }
 
-fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serde_json::Value {
+pub fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serde_json::Value {
     json!({
         "model": model,
         "messages": [
@@ -343,7 +248,7 @@ fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serd
     })
 }
 
-fn build_image_request_body(
+pub fn build_image_request_body(
     image_base64: &str,
     caption: Option<&str>,
     exif_context: &str,
@@ -400,7 +305,7 @@ pub fn slug_from_summary(summary: &str) -> String {
     }
 }
 
-const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge management assistant. Your job is to classify incoming text messages and format them as markdown for an Obsidian daily note.
+pub const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge management assistant. Your job is to classify incoming text messages and format them as markdown for an Obsidian daily note.
 
 ## Classification Rules:
 

@@ -51,8 +51,8 @@ pub enum AiError {
     #[error("HTTP request failed: {0}")]
     Request(#[from] reqwest::Error),
 
-    #[error("API returned error {status}: {message}")]
-    ApiError { status: u16, message: String },
+    #[error("AI Provider error {status}: {message}")]
+    ProviderError { status: u16, message: String },
 
     #[error("Rate limited, retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
@@ -66,8 +66,14 @@ pub enum AiError {
     #[error("Classification failed: {0}")]
     ClassificationFailed(String),
 
+    #[error("Summarization failed: {0}")]
+    SummarizationFailed(String),
+
     #[error("Max retries ({0}) exceeded")]
     MaxRetriesExceeded(u32),
+
+    #[error("Unsupported capability: {0}")]
+    UnsupportedCapability(String),
 }
 
 #[derive(Debug, thiserror::Error)]

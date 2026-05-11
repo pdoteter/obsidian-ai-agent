@@ -17,8 +17,9 @@ use teloxide::prelude::*;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
-use ai::client::OpenRouterClient;
-use ai::transcribe::WhisperClient;
+use ai::providers::openai_whisper::WhisperClient;
+use ai::providers::openrouter::OpenRouterClient;
+use ai::{AiProvider, AiService};
 use config::Config;
 use git::chat_tracker;
 use git::conflict;
@@ -56,17 +57,21 @@ async fn main() {
 
     info!("Starting Obsidian AI Agent...");
 
-    // Initialize OpenRouter client (for classification)
-    let ai_client = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
+    // Initialize AI Providers
+    let mut providers: HashMap<String, Arc<dyn AiProvider>> = HashMap::new();
+
+    // OpenRouter Provider
+    let openrouter = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
         Ok(c) => Arc::new(c),
         Err(e) => {
             error!(error = %e, "Failed to create OpenRouter client");
             std::process::exit(1);
         }
     };
+    providers.insert("openrouter".to_string(), openrouter.clone());
 
-    // Initialize Whisper client (for voice transcription)
-    let whisper_client = match WhisperClient::new(
+    // OpenAI Whisper Provider
+    let whisper = match WhisperClient::new(
         config.openai_api_key.clone(),
         config.whisper_model.clone(),
         config.whisper_language.clone(),
@@ -77,6 +82,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    providers.insert("openai".to_string(), whisper);
+
+    // Initialize AI Service (Orchestrator)
+    let ai_service = Arc::new(AiService::new(providers, &config));
 
     // Initialize Telegram bot
     let bot = Bot::new(&config.teloxide_token);
@@ -107,7 +116,7 @@ async fn main() {
             git_sync.clone(),
             config.git_sync_debounce_secs,
             conflict_resolver,
-            ai_client.clone(),
+            ai_service.clone(),
             config.clone(),
             chat_tracker.clone(),
         ))
@@ -143,8 +152,7 @@ async fn main() {
     Dispatcher::builder(bot, handler)
         .dependencies(dptree::deps![
             config.clone(),
-            ai_client.clone(),
-            whisper_client.clone(),
+            ai_service.clone(),
             vault.clone(),
             sync_notifier.clone(),
             conflict_pending.clone(),
@@ -176,8 +184,7 @@ async fn handle_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
-    whisper_client: Arc<WhisperClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
     chat_tracker: chat_tracker::ChatIdTracker,
@@ -189,7 +196,7 @@ async fn handle_message(
             bot,
             msg,
             config,
-            ai_client,
+            ai_service,
             vault,
             sync_notifier,
             chat_tracker,
@@ -200,8 +207,7 @@ async fn handle_message(
             bot,
             msg,
             config,
-            ai_client,
-            whisper_client,
+            ai_service,
             vault,
             sync_notifier,
             chat_tracker,
@@ -212,7 +218,7 @@ async fn handle_message(
             bot,
             msg,
             config,
-            ai_client,
+            ai_service,
             vault,
             sync_notifier,
             chat_tracker,
@@ -243,7 +249,7 @@ async fn handle_callback(
     >,
     transcript_pending: TranscriptPending,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<debounce::SyncNotifier>,
     chat_tracker: chat_tracker::ChatIdTracker,
@@ -268,7 +274,7 @@ async fn handle_callback(
                 bot,
                 q,
                 transcript_pending,
-                ai_client,
+                ai_service,
                 vault,
                 config,
                 sync_notifier,

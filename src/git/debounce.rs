@@ -8,7 +8,7 @@ use tracing::{error, info, warn};
 use super::chat_tracker::ChatIdTracker;
 use super::conflict::ConflictResolver;
 use super::sync::{GitSync, SyncResult};
-use crate::ai::client::OpenRouterClient;
+use crate::ai::AiService;
 use crate::ai::conflict::analyze_conflicts;
 use crate::config::Config;
 use crate::error::GitError;
@@ -73,7 +73,7 @@ pub fn spawn_debounced_sync(
     git_sync: Arc<GitSync>,
     debounce_secs: u64,
     conflict_resolver: ConflictResolver,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     config: Arc<Config>,
     chat_tracker: ChatIdTracker,
 ) -> SyncNotifier {
@@ -183,14 +183,14 @@ pub fn spawn_debounced_sync(
 
                                 // Call AI analysis with timeout
                                 let ai_analysis = {
-                                    let ai_client = ai_client.clone();
+                                    let ai_service = ai_service.clone();
                                     let config = config.clone();
                                     let info_clone = info.clone();
 
                                     match tokio::time::timeout(
                                         Duration::from_secs(25),
                                         analyze_conflicts(
-                                            &ai_client,
+                                            &ai_service,
                                             &config.openrouter_model_classify,
                                             &info_clone,
                                         ),

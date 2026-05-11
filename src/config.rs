@@ -74,8 +74,28 @@ impl Default for GitConfig {
     }
 }
 
+/// URL handling configuration settings
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TranscriptionConfig {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub language: Option<String>,
+}
+
+/// AI configuration settings for a specific task
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct TaskAiConfig {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 struct AiConfig {
+    #[serde(default = "default_provider")]
+    provider: String,
+
     #[serde(default = "default_whisper_model")]
     whisper_model: String,
 
@@ -83,14 +103,27 @@ struct AiConfig {
 
     #[serde(default = "default_classify_model")]
     classify_model: String,
+
+    #[serde(default)]
+    transcription: TranscriptionConfig,
+
+    #[serde(default)]
+    classification: TaskAiConfig,
+
+    #[serde(default)]
+    summarization: TaskAiConfig,
 }
 
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            whisper_model: "whisper-1".to_string(),
+            provider: default_provider(),
+            whisper_model: default_whisper_model(),
             whisper_language: None,
-            classify_model: "google/gemini-2.5-flash".to_string(),
+            classify_model: default_classify_model(),
+            transcription: TranscriptionConfig::default(),
+            classification: TaskAiConfig::default(),
+            summarization: TaskAiConfig::default(),
         }
     }
 }
@@ -119,6 +152,9 @@ fn default_git_branch() -> String {
 }
 fn default_debounce_secs() -> u64 {
     300
+}
+fn default_provider() -> String {
+    "openrouter".to_string()
 }
 fn default_whisper_model() -> String {
     "whisper-1".to_string()
@@ -165,9 +201,13 @@ pub struct Config {
     pub git_remote_name: String,
     pub git_branch: String,
     pub git_sync_debounce_secs: u64,
+    pub ai_provider: String,
     pub whisper_model: String,
     pub whisper_language: Option<String>,
     pub openrouter_model_classify: String,
+    pub transcription: TranscriptionConfig,
+    pub classification: TaskAiConfig,
+    pub summarization: TaskAiConfig,
     pub allowed_user_ids: Vec<u64>,
     pub timezone: String,
     /// Chrono strftime format for {{date}} in daily note templates
@@ -176,6 +216,37 @@ pub struct Config {
     pub image: ImageConfig,
     pub url: UrlConfig,
     pub ack: AckConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            teloxide_token: String::new(),
+            openrouter_api_key: String::new(),
+            openai_api_key: String::new(),
+            vault_path: PathBuf::from("."),
+            git_sync_enabled: false,
+            git_path: None,
+            git_ssh_key_path: None,
+            git_remote_name: "origin".to_string(),
+            git_branch: "main".to_string(),
+            git_sync_debounce_secs: 60,
+            ai_provider: "openrouter".to_string(),
+            whisper_model: "whisper-1".to_string(),
+            whisper_language: None,
+            openrouter_model_classify: "google/gemini-2.5-flash".to_string(),
+            transcription: TranscriptionConfig::default(),
+            classification: TaskAiConfig::default(),
+            summarization: TaskAiConfig::default(),
+            allowed_user_ids: Vec::new(),
+            timezone: "UTC".to_string(),
+            date_display_format: "%Y-%m-%d".to_string(),
+            guide_path: None,
+            image: ImageConfig::default(),
+            url: UrlConfig::default(),
+            ack: AckConfig::default(),
+        }
+    }
 }
 
 impl Config {
@@ -251,9 +322,13 @@ impl Config {
             git_remote_name: file.git.remote_name,
             git_branch: file.git.branch,
             git_sync_debounce_secs: file.git.sync_debounce_secs,
+            ai_provider: file.ai.provider,
             whisper_model: file.ai.whisper_model,
             whisper_language: file.ai.whisper_language.filter(|v| !v.is_empty()),
             openrouter_model_classify: file.ai.classify_model,
+            transcription: file.ai.transcription,
+            classification: file.ai.classification,
+            summarization: file.ai.summarization,
             allowed_user_ids: file.access.allowed_user_ids,
             timezone: file.timezone,
             date_display_format: momentjs_to_chrono(&file.date_display_format),

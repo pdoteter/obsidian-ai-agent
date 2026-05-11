@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::ai::client::OpenRouterClient;
+use crate::ai::AiService;
 use crate::config::Config;
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
@@ -35,7 +35,7 @@ pub async fn handle_url_message(
     bot: Bot,
     msg: Message,
     config: Arc<Config>,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     sync_notifier: Option<SyncNotifier>,
     chat_tracker: ChatIdTracker,
@@ -134,7 +134,7 @@ pub async fn handle_url_message(
                 };
 
                 let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-                let summary = match ai_client
+                let summary = match ai_service
                     .summarize_url(
                         &page_content,
                         None,
@@ -255,7 +255,7 @@ pub async fn handle_url_message(
 
                 let guide = crate::ai::guide::load_guide(&config.guide_path).await;
 
-                match ai_client
+                match ai_service
                     .summarize_url(
                         &page_content,
                         surrounding_text.as_deref(),
@@ -361,7 +361,7 @@ pub async fn handle_transcript_callback(
     bot: Bot,
     q: CallbackQuery,
     transcript_pending: TranscriptPending,
-    ai_client: Arc<OpenRouterClient>,
+    ai_service: Arc<AiService>,
     vault: Arc<DailyNoteManager>,
     config: Arc<Config>,
     sync_notifier: Option<SyncNotifier>,
@@ -416,7 +416,7 @@ pub async fn handle_transcript_callback(
         };
 
         let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-        let summary = match ai_client
+        let summary = match ai_service
             .summarize_url(
                 &page_content,
                 None,
@@ -434,7 +434,7 @@ pub async fn handle_transcript_callback(
         };
 
         // Format transcript with AI before saving
-        let formatted_transcript = match ai_client
+        let formatted_transcript = match ai_service
             .format_transcript(
                 &transcript_text,
                 &request.title,
