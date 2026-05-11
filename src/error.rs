@@ -137,3 +137,23 @@ pub enum AppError {
 /// Convenience type alias
 #[allow(dead_code)]
 pub type AppResult<T> = Result<T, AppError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_error_display() {
+        let download_err = AudioError::Download("network error".to_string());
+        assert_eq!(
+            download_err.to_string(),
+            "Failed to download file from Telegram: network error"
+        );
+
+        let io_err = AudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
+        assert_eq!(io_err.to_string(), "IO error: file not found");
+    }
+}
