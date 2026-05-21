@@ -221,8 +221,12 @@ mod tests {
                     );
                 }
                 (None, None) => {}
-                (Some(_), None) => panic!("Failed on case: {} (expected None, got Some)", case.name),
-                (None, Some(_)) => panic!("Failed on case: {} (expected Some, got None)", case.name),
+                (Some(_), None) => {
+                    panic!("Failed on case: {} (expected None, got Some)", case.name)
+                }
+                (None, Some(_)) => {
+                    panic!("Failed on case: {} (expected Some, got None)", case.name)
+                }
             }
         }
     }

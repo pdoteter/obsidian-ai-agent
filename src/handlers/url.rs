@@ -569,7 +569,9 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
     // If no result lines found, just hard truncate the entire message
     if header_end_idx == 0 {
         if confirmation.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-            let mut result = crate::utils::safe_truncate(&confirmation, TELEGRAM_MAX_MESSAGE_LENGTH - 3).to_string();
+            let mut result =
+                crate::utils::safe_truncate(&confirmation, TELEGRAM_MAX_MESSAGE_LENGTH - 3)
+                    .to_string();
             result.push_str("...");
             return result;
         }
@@ -597,7 +599,8 @@ fn truncate_confirmation_if_needed(confirmation: String) -> String {
 
     // Final safety: hard truncate if still too long
     if message.len() > TELEGRAM_MAX_MESSAGE_LENGTH {
-        let mut result = crate::utils::safe_truncate(&message, TELEGRAM_MAX_MESSAGE_LENGTH - 3).to_string();
+        let mut result =
+            crate::utils::safe_truncate(&message, TELEGRAM_MAX_MESSAGE_LENGTH - 3).to_string();
         result.push_str("...");
         return result;
     }

@@ -3,7 +3,7 @@ use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 use crate::ai::classify::ClassifiedNote;
 use crate::ai::summarize::UrlSummary;
@@ -123,18 +123,25 @@ impl AiProvider for OpenRouterClient {
         model: &str,
         guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
-        info!(text_length = text.len(), model = model, "Classifying text via OpenRouter");
+        info!(
+            text_length = text.len(),
+            model = model,
+            "Classifying text via OpenRouter"
+        );
         // Note: CLASSIFICATION_SYSTEM_PROMPT and helper functions remain in ai/classify.rs for now
         // or we move them here if they are provider-specific.
         // Actually, they use response_format which is very OpenAI-like.
-        
+
         // I'll re-implement the logic here, pulling from classify.rs
-        let system_prompt = crate::ai::guide::compose_system_prompt(crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT, guide);
+        let system_prompt = crate::ai::guide::compose_system_prompt(
+            crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT,
+            guide,
+        );
         let body = crate::ai::classify::build_text_request_body(text, model, &system_prompt);
-        
+
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
-        
+
         // Use the same robust parsing logic from classify.rs
         crate::ai::classify::parse_classification_with_fallback(&content)
     }
@@ -148,17 +155,23 @@ impl AiProvider for OpenRouterClient {
         guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
         info!(model = model, "Classifying image via OpenRouter");
-        
+
         let base_prompt = format!(
             "{}\n\nYou are also receiving an image. Describe what you see and classify it. If a caption is provided, use it as primary context. Include the image description in the markdown output as a short paragraph.",
             crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT
         );
         let system_prompt = crate::ai::guide::compose_system_prompt(&base_prompt, guide);
 
-        let body = crate::ai::classify::build_image_request_body(image_base64, caption, exif_context, model, &system_prompt);
+        let body = crate::ai::classify::build_image_request_body(
+            image_base64,
+            caption,
+            exif_context,
+            model,
+            &system_prompt,
+        );
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
-        
+
         crate::ai::classify::parse_classification_with_fallback(&content)
     }
 
@@ -171,9 +184,17 @@ impl AiProvider for OpenRouterClient {
     ) -> Result<UrlSummary, AiError> {
         info!(url = %page_content.url, model = model, "Summarizing URL via OpenRouter");
 
-        let system_prompt = crate::ai::guide::compose_system_prompt(crate::ai::summarize::url_summary_system_prompt(), guide);
-        let body = crate::ai::summarize::build_url_request_body(page_content, user_text, model, &system_prompt);
-        
+        let system_prompt = crate::ai::guide::compose_system_prompt(
+            crate::ai::summarize::url_summary_system_prompt(),
+            guide,
+        );
+        let body = crate::ai::summarize::build_url_request_body(
+            page_content,
+            user_text,
+            model,
+            &system_prompt,
+        );
+
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
 
@@ -188,7 +209,9 @@ impl AiProvider for OpenRouterClient {
     async fn transcribe(&self, _audio_bytes: &[u8]) -> Result<String, AiError> {
         // OpenRouter doesn't support Whisper directly via chat completions yet in a standard way
         // that matches our current WhisperClient.
-        Err(AiError::UnsupportedCapability("Transcription not supported by OpenRouter provider".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "Transcription not supported by OpenRouter provider".to_string(),
+        ))
     }
 
     async fn format_transcript(
@@ -197,11 +220,22 @@ impl AiProvider for OpenRouterClient {
         video_title: &str,
         model: &str,
     ) -> Result<String, AiError> {
-        debug!(video_title = video_title, model = model, "Formatting transcript via OpenRouter");
-        
+        debug!(
+            video_title = video_title,
+            model = model,
+            "Formatting transcript via OpenRouter"
+        );
+
         let guide_path = crate::ai::transcript_format::default_guide_path();
-        let guide_content = crate::ai::guide::load_guide(&Some(guide_path)).await.unwrap_or_default();
-        let body = crate::ai::transcript_format::build_transcript_format_body(model, video_title, raw_transcript, &guide_content);
+        let guide_content = crate::ai::guide::load_guide(&Some(guide_path))
+            .await
+            .unwrap_or_default();
+        let body = crate::ai::transcript_format::build_transcript_format_body(
+            model,
+            video_title,
+            raw_transcript,
+            &guide_content,
+        );
 
         let response = self.chat_completion(&body).await?;
         let formatted_text = Self::extract_content(&response)?;

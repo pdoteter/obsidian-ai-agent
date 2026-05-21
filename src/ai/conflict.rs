@@ -16,7 +16,10 @@ fn truncate_content(s: &str, max_chars: usize) -> String {
     if s.len() <= max_chars {
         return s.to_string();
     }
-    format!("{}... (truncated)", crate::utils::safe_truncate(s, max_chars))
+    format!(
+        "{}... (truncated)",
+        crate::utils::safe_truncate(s, max_chars)
+    )
 }
 
 /// Parse AI response text into structured ConflictAnalysis
@@ -118,11 +121,19 @@ pub async fn analyze_conflict(
     );
 
     let messages = vec![
-        ChatMessage { role: "system".to_string(), content: system_prompt.to_string() },
-        ChatMessage { role: "user".to_string(), content: user_prompt }
+        ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: user_prompt,
+        },
     ];
 
-    let text = ai_service.chat_completion(model, messages, Some(512)).await?;
+    let text = ai_service
+        .chat_completion(model, messages, Some(512))
+        .await?;
     Ok(parse_analysis_response(&text))
 }
 

@@ -260,7 +260,9 @@ mod tests {
         // Each 🦀 is replaced by '-' or similar if not alphanumeric.
         // Actually sanitize_slug replaces non-ascii-alphanumeric with '-'.
         // So 🦀 (unicode) will become '-'.
-        assert!(sanitized.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+        assert!(sanitized
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
     }
 
     #[test]

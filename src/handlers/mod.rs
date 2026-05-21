@@ -1,3 +1,4 @@
+pub mod finance;
 pub mod photo;
 pub mod text;
 pub mod url;

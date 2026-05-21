@@ -168,13 +168,11 @@ static TIMESTAMP_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Timestamp regex is valid")
 });
 
-static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"<[^>]+>").expect("HTML tag regex is valid")
-});
+static HTML_TAG_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<[^>]+>").expect("HTML tag regex is valid"));
 
-static SINGLE_SPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s+").expect("Whitespace regex is valid")
-});
+static SINGLE_SPACE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").expect("Whitespace regex is valid"));
 
 /// Parse VTT (WebVTT) subtitle format into plain text.
 ///
@@ -203,7 +201,7 @@ fn parse_vtt(raw: &str) -> String {
 
         // Strip HTML tags
         let cleaned = HTML_TAG_REGEX.replace_all(trimmed, "");
-        
+
         if !cleaned.is_empty() {
             text_lines.push(cleaned.to_string());
         }
@@ -213,7 +211,10 @@ fn parse_vtt(raw: &str) -> String {
     let joined = text_lines.join(" ");
 
     // Collapse multiple spaces to single space
-    SINGLE_SPACE_REGEX.replace_all(&joined, " ").trim().to_string()
+    SINGLE_SPACE_REGEX
+        .replace_all(&joined, " ")
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -225,7 +226,7 @@ mod tests {
         // This test verifies the function exists and has the correct signature.
         // We test with a valid video ID format to check the command construction path.
         // Real execution would require yt-dlp to be installed.
-        let result = fetch_transcript("test_video_id").await;
+        let result = fetch_transcript("dQw4w9WgXcQ").await;
 
         // We expect either NotFound (yt-dlp not installed) or a command failure
         assert!(result.is_err());
@@ -249,7 +250,7 @@ mod tests {
             "slash/path",
             "back\\slash",
             "quote'n",
-            "dash-und_12", // 12 chars
+            "dash-und_123", // 12 chars
         ];
 
         for id in invalid_ids {

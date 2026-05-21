@@ -345,7 +345,7 @@ mod tests {
             "slash/path",
             "back\\slash",
             "quote'n",
-            "dash-und_12", // 12 chars
+            "dash-und_123", // 12 chars
         ];
 
         for id in invalid_ids {

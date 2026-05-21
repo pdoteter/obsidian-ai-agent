@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use tracing::{warn};
+use tracing::warn;
 
 use crate::error::AiError;
 
@@ -123,7 +123,8 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
 
     // Try to extract markdown (required for useful output)
     let markdown_re = MARKDOWN_RE.get_or_init(|| {
-        Regex::new(r#""markdown"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).expect("Invalid markdown regex")
+        Regex::new(r#""markdown"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#)
+            .expect("Invalid markdown regex")
     });
     let markdown = markdown_re
         .captures(content)

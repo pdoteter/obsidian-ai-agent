@@ -1,4 +1,4 @@
-use crate::ai::guide::{compose_system_prompt};
+use crate::ai::guide::compose_system_prompt;
 use crate::error::AiError;
 use serde_json::json;
 use std::path::PathBuf;

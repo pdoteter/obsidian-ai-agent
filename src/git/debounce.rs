@@ -8,8 +8,8 @@ use tracing::{error, info, warn};
 use super::chat_tracker::ChatIdTracker;
 use super::conflict::ConflictResolver;
 use super::sync::{GitSync, SyncResult};
-use crate::ai::AiService;
 use crate::ai::conflict::analyze_conflicts;
+use crate::ai::AiService;
 use crate::config::Config;
 use crate::error::GitError;
 
@@ -211,7 +211,10 @@ pub fn spawn_debounced_sync(
 
                                 // Prepare diff preview (truncate to 2500 chars)
                                 let diff_preview = if info.diff_output.len() > 2500 {
-                                    format!("{}... (truncated)", crate::utils::safe_truncate(&info.diff_output, 2500))
+                                    format!(
+                                        "{}... (truncated)",
+                                        crate::utils::safe_truncate(&info.diff_output, 2500)
+                                    )
                                 } else {
                                     info.diff_output.clone()
                                 };
