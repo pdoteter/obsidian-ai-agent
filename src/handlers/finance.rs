@@ -6,7 +6,7 @@ use teloxide::dispatching::UpdateHandler;
 use teloxide::net::Download;
 use teloxide::prelude::*;
 use teloxide::types::ChatAction;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::ai::{AiService, ChatMessage};
 use crate::config::Config;
@@ -40,7 +40,6 @@ If the transaction details do NOT specify a quantity/position size, do NOT assum
 Maintain the historical notes/details inside the notes column or in a `## Notes` section at the bottom.
 Return the entire updated note content as markdown.
 "#;
-
 
 #[derive(Debug, Deserialize, Serialize)]
 struct FinanceClassification {
@@ -343,6 +342,21 @@ async fn handle_text_inner(
             bot.send_chat_action(msg.chat.id, ChatAction::Typing)
                 .await?;
 
+            // Pull latest changes from vault before transaction update
+            if let Some(ref notifier) = sync_notifier {
+                match notifier.pull_if_idle().await {
+                    Ok(Some(result)) => {
+                        info!(result = %result, "Completed pre-transaction git pull for finance bot");
+                    }
+                    Ok(None) => {
+                        debug!("Skipping pre-transaction git pull because debounce worker is busy");
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "Pre-transaction git pull failed, continuing with local files");
+                    }
+                }
+            }
+
             let source = get_message_source(&msg);
 
             // Process transaction note update
@@ -355,7 +369,6 @@ async fn handle_text_inner(
                 source,
             )
             .await
-
             {
                 Ok(r) => r,
                 Err(e) => {
@@ -379,6 +392,21 @@ async fn handle_text_inner(
         "question" => {
             bot.send_chat_action(msg.chat.id, ChatAction::Typing)
                 .await?;
+
+            // Pull latest changes from vault before answering a query
+            if let Some(ref notifier) = sync_notifier {
+                match notifier.pull_if_idle().await {
+                    Ok(Some(result)) => {
+                        info!(result = %result, "Completed pre-query git pull for finance bot");
+                    }
+                    Ok(None) => {
+                        debug!("Skipping pre-query git pull because debounce worker is busy");
+                    }
+                    Err(error) => {
+                        warn!(error = %error, "Pre-query git pull failed, continuing with local files");
+                    }
+                }
+            }
 
             let reply = match handle_portfolio_query(
                 ai_service,
@@ -523,7 +551,6 @@ The new transaction message from the user is:
 {image_suffix}
 Please update the note and return the JSON object."#
     );
-
 
     let messages = vec![
         ChatMessage {
@@ -689,7 +716,6 @@ fn get_message_source(msg: &Message) -> Option<String> {
         }
     }
 
-
     if let Some(sig) = msg.forward_author_signature() {
         return Some(sig.to_string());
     }
@@ -716,8 +742,6 @@ fn get_message_source(msg: &Message) -> Option<String> {
 
     None
 }
-
-
 
 #[cfg(test)]
 mod tests {
