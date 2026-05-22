@@ -44,7 +44,7 @@ log_level: info
 # finance:
 #   enabled: false                           # Enable/disable the secondary finance bot (default: false)
 #   folder: Finance                          # Subfolder under vault_path to keep position notes (default: Finance)
-#   assets_folder: Finance/Assets            # Folder inside vault to save trade/chart attachments (default: Finance/Assets)
+#   assets_folder: Assets                    # Folder relative to finance.folder to save trade/chart attachments (default: Assets)
 #   guide_path: ./finance-system-guide.md    # Path to custom finance AI guide rules (optional, falls back to built-in rules)
 #   allowed_user_ids: []                     # Finance bot authorized user IDs (optional, falls back to access.allowed_user_ids if empty)
 

@@ -33,9 +33,14 @@ Columns: Date | Action (BUY/SELL or OPEN/CLOSE) | Price | Quantity | Profit/Loss
 Add the new transaction to this table.
 If an image attachment link is provided (e.g., `![[Finance/Assets/...]]`), you MUST include it inside the transaction notes column or in a notes section so it is linked properly!
 
+If a message source/origin is specified in the transaction prompt, you MUST record this source clearly inside the transaction's "Notes" column (e.g. `[Source: <source>]`).
+
+If the transaction details do NOT specify a quantity/position size, do NOT assume a default value of 1. Instead, leave the Quantity column in the table empty (or blank) and do not alter or recalculate the existing frontmatter fields (like position_size or average_entry) based on this transaction.
+
 Maintain the historical notes/details inside the notes column or in a `## Notes` section at the bottom.
 Return the entire updated note content as markdown.
 "#;
+
 
 #[derive(Debug, Deserialize, Serialize)]
 struct FinanceClassification {
@@ -199,10 +204,15 @@ async fn handle_photo_message(
     let uuid_suffix = crate::utils::safe_truncate(&uuid_str, 4);
     let filename = format!("{}-finance-{}.jpg", today, uuid_suffix);
 
+    let resolved_assets_folder = std::path::Path::new(&config.finance.folder)
+        .join(&config.finance.assets_folder)
+        .to_string_lossy()
+        .replace('\\', "/");
+
     let saved_path = crate::image::process::save_image(
         &resized,
         &config.vault_path,
-        &config.finance.assets_folder,
+        &resolved_assets_folder,
         &filename,
     )
     .await
@@ -250,7 +260,7 @@ async fn handle_photo_message(
         format!("[Attached photo describing: {}]", image_description)
     };
 
-    let wiki_link = format!("![[{}/{}]]", config.finance.assets_folder, filename);
+    let wiki_link = format!("![[{}/{}]]", resolved_assets_folder, filename);
 
     handle_text_inner(
         bot,
@@ -333,6 +343,8 @@ async fn handle_text_inner(
             bot.send_chat_action(msg.chat.id, ChatAction::Typing)
                 .await?;
 
+            let source = get_message_source(&msg);
+
             // Process transaction note update
             let reply = match handle_transaction_update(
                 ai_service,
@@ -340,8 +352,10 @@ async fn handle_text_inner(
                 &symbol,
                 text,
                 photo_wiki_link,
+                source,
             )
             .await
+
             {
                 Ok(r) => r,
                 Err(e) => {
@@ -450,6 +464,7 @@ async fn handle_transaction_update(
     symbol: &str,
     new_transaction_text: &str,
     photo_wiki_link: Option<String>,
+    source: Option<String>,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let finance_dir = config.vault_path.join(&config.finance.folder);
     if !finance_dir.exists() {
@@ -489,6 +504,12 @@ Do not include any explanation or markdown formatting in your response. Return r
         String::new()
     };
 
+    let source_suffix = if let Some(ref src) = source {
+        format!("\nMessage source/origin: {}\n(You MUST record this source in the transaction's Notes column.)", src)
+    } else {
+        String::new()
+    };
+
     let user_message = format!(
         r#"Here is the current Obsidian note content for {symbol} (it may be empty if this is the first transaction):
 === CURRENT NOTE CONTENT ===
@@ -497,10 +518,12 @@ Do not include any explanation or markdown formatting in your response. Return r
 
 The new transaction message from the user is:
 "{new_transaction_text}"
+{source_suffix}
 
 {image_suffix}
 Please update the note and return the JSON object."#
     );
+
 
     let messages = vec![
         ChatMessage {
@@ -647,6 +670,54 @@ fn clean_json_response(content: &str) -> String {
     }
     cleaned.trim().to_string()
 }
+
+/// Extract origin/source from a Telegram message
+fn get_message_source(msg: &Message) -> Option<String> {
+    if let Some(chat) = msg.forward_from_chat() {
+        if let Some(username) = chat.username() {
+            return Some(format!("@{}", username));
+        } else if let Some(title) = chat.title() {
+            return Some(title.to_string());
+        }
+    }
+
+    if let Some(user) = msg.forward_from_user() {
+        if let Some(username) = &user.username {
+            return Some(format!("@{}", username));
+        } else {
+            return Some(user.full_name());
+        }
+    }
+
+
+    if let Some(sig) = msg.forward_author_signature() {
+        return Some(sig.to_string());
+    }
+
+    if let Some(name) = msg.forward_from_sender_name() {
+        return Some(name.to_string());
+    }
+
+    if !msg.chat.is_private() {
+        if let Some(username) = msg.chat.username() {
+            return Some(format!("@{}", username));
+        } else if let Some(title) = msg.chat.title() {
+            return Some(title.to_string());
+        }
+    }
+
+    if let Some(user) = &msg.from {
+        if let Some(username) = &user.username {
+            return Some(format!("@{}", username));
+        } else {
+            return Some(user.full_name());
+        }
+    }
+
+    None
+}
+
+
 
 #[cfg(test)]
 mod tests {

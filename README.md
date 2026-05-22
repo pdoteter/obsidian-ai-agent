@@ -53,7 +53,7 @@ A configurable, secondary Telegram bot/handler dedicated to financial portfolio 
 
 ### Core Features
 1. **Trade Logging & Update Positions**: Send or forward position updates (e.g., "Buy 10 AAPL @ 175", "Closed BTC position") to the bot. It automatically parses the message using structured AI classification, locates the stock's ledger file (creates it if missing), updates the YAML frontmatter (status, size, average entry, realized profit, last updated), and appends the transaction to a Markdown ledger table.
-2. **Chart & Photo Attachments**: Forward trade fill confirmations or chart screenshots. The bot resizes and downloads them to a configurable vault subdirectory (e.g., `Finance/Assets/`), runs Vision AI to describe the image content, and embeds a clean wiki-link (e.g., `![[Finance/Assets/...]]`) directly inside the trade notes.
+2. **Chart & Photo Attachments**: Forward trade fill confirmations or chart screenshots. The bot resizes and downloads them to a configurable vault subdirectory relative to the finance folder (e.g., `Finance/Assets/`), runs Vision AI to describe the image content, and embeds a clean wiki-link (e.g., `![[Finance/Assets/...]]`) directly inside the trade notes.
 3. **Voice Transactions**: Transcribes OGG voice messages via Whisper and processes them as trade transaction updates or queries.
 4. **Natural Language Portfolio Q&A**: Ask the bot questions like *"Do I have AAPL?"*, *"How large is my position?"*, or *"What are my total profits?"*. The bot reads and indexes the frontmatter and transactions across all equity notes in the Finance folder to generate clean, concise markdown answers.
 5. **Configurable Prompt Guide**: Fully customize the ledger calculations, formatting rules, and Q&A tone by creating a local markdown file (e.g., `finance-system-guide.md`) and pointing `finance.guide_path` to it.
@@ -182,7 +182,7 @@ log_level: info                             # default: info
 | `url.max_urls_per_message` | ❌ | Maximum URLs to process per message (default: 5) |
 | `finance.enabled` | ❌ | Enable secondary finance bot (default: `false`) |
 | `finance.folder` | ❌ | Folder in vault for finance ledger files (default: `Finance`) |
-| `finance.assets_folder` | ❌ | Subfolder inside vault for trade attachments (default: `Finance/Assets`) |
+| `finance.assets_folder` | ❌ | Subfolder relative to `finance.folder` for trade attachments (default: `Assets`) |
 | `finance.guide_path` | ❌ | Custom AI guide rules for finance bot (default: none, falls back to built-in rules) |
 | `finance.allowed_user_ids` | ❌ | Finance bot authorized Telegram user IDs (default: `[]` = falls back to global) |
 | `timezone` | ❌ | Timezone for timestamps (default: `Europe/Brussels`) |

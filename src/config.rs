@@ -462,7 +462,7 @@ impl Default for FinanceConfig {
         Self {
             enabled: false,
             folder: "Finance".to_string(),
-            assets_folder: "Finance/Assets".to_string(),
+            assets_folder: "Assets".to_string(),
             guide_path: None,
             allowed_user_ids: Vec::new(),
         }
@@ -955,7 +955,7 @@ git:
         let finance_config = FinanceConfig::default();
         assert!(!finance_config.enabled);
         assert_eq!(finance_config.folder, "Finance");
-        assert_eq!(finance_config.assets_folder, "Finance/Assets");
+        assert_eq!(finance_config.assets_folder, "Assets");
         assert!(finance_config.guide_path.is_none());
         assert!(finance_config.allowed_user_ids.is_empty());
     }
