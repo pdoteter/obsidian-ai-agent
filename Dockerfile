@@ -51,6 +51,10 @@ WORKDIR /app
 # Copy the binary from builder
 COPY --from=builder /app/target/release/obsidian-ai-agent /app/obsidian-ai-agent
 
+# Copy system guides
+COPY system-guide.md /app/system-guide.md
+COPY finance-system-guide.md /app/finance-system-guide.md
+
 # Create vault mount point
 RUN mkdir -p /app/vault && chown -R botuser:botuser /app
 
