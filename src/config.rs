@@ -40,6 +40,9 @@ struct FileConfig {
 
     #[serde(default)]
     ack: AckConfig,
+
+    #[serde(default)]
+    finance: FinanceConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -216,6 +219,8 @@ pub struct Config {
     pub image: ImageConfig,
     pub url: UrlConfig,
     pub ack: AckConfig,
+    pub finance: FinanceConfig,
+    pub finance_teloxide_token: Option<String>,
 }
 
 impl Default for Config {
@@ -245,6 +250,8 @@ impl Default for Config {
             image: ImageConfig::default(),
             url: UrlConfig::default(),
             ack: AckConfig::default(),
+            finance: FinanceConfig::default(),
+            finance_teloxide_token: None,
         }
     }
 }
@@ -311,6 +318,25 @@ impl Config {
             }
         });
 
+        let mut finance = file.finance.clone();
+        finance.guide_path = file.finance.guide_path.map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                config_dir.join(p)
+            }
+        });
+
+        // Read finance secret from environment if enabled
+        let finance_teloxide_token = if file.finance.enabled {
+            Some(
+                env::var("FINANCE_TELOXIDE_TOKEN")
+                    .map_err(|_| ConfigError::Missing("FINANCE_TELOXIDE_TOKEN"))?,
+            )
+        } else {
+            env::var("FINANCE_TELOXIDE_TOKEN").ok()
+        };
+
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
@@ -336,12 +362,23 @@ impl Config {
             image: file.image,
             url: file.url,
             ack: file.ack,
+            finance,
+            finance_teloxide_token,
         })
     }
 
     /// Check if a user is allowed (empty list = allow all)
     pub fn is_user_allowed(&self, user_id: u64) -> bool {
         self.allowed_user_ids.is_empty() || self.allowed_user_ids.contains(&user_id)
+    }
+
+    /// Check if a user is allowed on the finance bot (falls back to general allowed users if empty)
+    pub fn is_finance_user_allowed(&self, user_id: u64) -> bool {
+        if self.finance.allowed_user_ids.is_empty() {
+            self.is_user_allowed(user_id)
+        } else {
+            self.finance.allowed_user_ids.contains(&user_id)
+        }
     }
 }
 
@@ -410,10 +447,32 @@ pub enum LogAckMode {
     Text,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct FinanceConfig {
+    pub enabled: bool,
+    pub folder: String,
+    pub assets_folder: String,
+    pub guide_path: Option<PathBuf>,
+    pub allowed_user_ids: Vec<u64>,
+}
+
+impl Default for FinanceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            folder: "Finance".to_string(),
+            assets_folder: "Finance/Assets".to_string(),
+            guide_path: None,
+            allowed_user_ids: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use serial_test::serial;
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_url_config_defaults() {
@@ -643,7 +702,12 @@ git:
         }
     }
 
-    fn setup_env() -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    fn setup_env() -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         let old_config = env::var("CONFIG_PATH").ok();
         let old_teloxide = env::var("TELOXIDE_TOKEN").ok();
         let old_openrouter = env::var("OPENROUTER_API_KEY").ok();
@@ -657,7 +721,14 @@ git:
         (old_config, old_teloxide, old_openrouter, old_openai)
     }
 
-    fn restore_env(old_env: (Option<String>, Option<String>, Option<String>, Option<String>)) {
+    fn restore_env(
+        old_env: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+    ) {
         let (old_config, old_teloxide, old_openrouter, old_openai) = old_env;
         match old_config {
             Some(v) => env::set_var("CONFIG_PATH", v),
@@ -695,7 +766,8 @@ git:
 "#,
                 vault_dir.display()
             ),
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         let old_env = setup_env();
         env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
@@ -723,17 +795,26 @@ git:
 
         // Test missing TELOXIDE_TOKEN
         let result = Config::load();
-        assert!(matches!(result, Err(ConfigError::Missing("TELOXIDE_TOKEN"))));
+        assert!(matches!(
+            result,
+            Err(ConfigError::Missing("TELOXIDE_TOKEN"))
+        ));
 
         // Test missing OPENROUTER_API_KEY
         env::set_var("TELOXIDE_TOKEN", "test_teloxide");
         let result = Config::load();
-        assert!(matches!(result, Err(ConfigError::Missing("OPENROUTER_API_KEY"))));
+        assert!(matches!(
+            result,
+            Err(ConfigError::Missing("OPENROUTER_API_KEY"))
+        ));
 
         // Test missing OPENAI_API_KEY
         env::set_var("OPENROUTER_API_KEY", "test_openrouter");
         let result = Config::load();
-        assert!(matches!(result, Err(ConfigError::Missing("OPENAI_API_KEY"))));
+        assert!(matches!(
+            result,
+            Err(ConfigError::Missing("OPENAI_API_KEY"))
+        ));
 
         restore_env(old_env);
     }
@@ -757,7 +838,7 @@ git:
             Err(ConfigError::FileRead(path, _)) => {
                 assert_eq!(path, PathBuf::from("/does/not/exist/config.yaml"));
                 Ok(())
-            },
+            }
             _ => Err("Expected ConfigError::FileRead".to_string()),
         }
     }
@@ -786,7 +867,7 @@ git:
             Err(ConfigError::Parse(path, _)) => {
                 assert_eq!(path, config_file);
                 Ok(())
-            },
+            }
             _ => Err("Expected ConfigError::Parse".to_string()),
         }
     }
@@ -808,7 +889,8 @@ git:
 "#,
                 non_existent_vault.display()
             ),
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         let old_env = setup_env();
         env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
@@ -824,7 +906,7 @@ git:
             Err(ConfigError::InvalidPath(path)) => {
                 assert_eq!(path, non_existent_vault);
                 Ok(())
-            },
+            }
             _ => Err("Expected ConfigError::InvalidPath".to_string()),
         }
     }
@@ -847,7 +929,8 @@ git:
 "#,
                 vault_dir.display()
             ),
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         let old_env = setup_env();
         env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
@@ -860,8 +943,101 @@ git:
         restore_env(old_env);
 
         match result {
-            Err(ConfigError::MissingSetting("git.path (required when git.sync_enabled is true)")) => Ok(()),
+            Err(ConfigError::MissingSetting(
+                "git.path (required when git.sync_enabled is true)",
+            )) => Ok(()),
             _ => Err("Expected ConfigError::MissingSetting".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_finance_config_defaults() {
+        let finance_config = FinanceConfig::default();
+        assert!(!finance_config.enabled);
+        assert_eq!(finance_config.folder, "Finance");
+        assert_eq!(finance_config.assets_folder, "Finance/Assets");
+        assert!(finance_config.guide_path.is_none());
+        assert!(finance_config.allowed_user_ids.is_empty());
+    }
+
+    #[test]
+    fn test_custom_finance_config() {
+        let file_config: FileConfig = serde_yml::from_str(
+            "vault_path: /tmp/vault\nfinance:\n  enabled: true\n  folder: custom_finance\n  assets_folder: custom_assets\n  guide_path: /path/to/finance-guide.md\n  allowed_user_ids:\n    - 98765\n"
+        ).unwrap();
+
+        assert!(file_config.finance.enabled);
+        assert_eq!(file_config.finance.folder, "custom_finance");
+        assert_eq!(file_config.finance.assets_folder, "custom_assets");
+        assert_eq!(
+            file_config.finance.guide_path,
+            Some(PathBuf::from("/path/to/finance-guide.md"))
+        );
+        assert_eq!(file_config.finance.allowed_user_ids, vec![98765]);
+    }
+
+    #[test]
+    fn test_is_finance_user_allowed() {
+        let mut config = Config::default();
+        config.allowed_user_ids = vec![123, 456];
+        config.finance.allowed_user_ids = vec![];
+
+        // Empty finance.allowed_user_ids falls back to global allowed_user_ids
+        assert!(config.is_finance_user_allowed(123));
+        assert!(config.is_finance_user_allowed(456));
+        assert!(!config.is_finance_user_allowed(789));
+
+        // When finance.allowed_user_ids is explicitly set, it overrides the global list
+        config.finance.allowed_user_ids = vec![789];
+        assert!(!config.is_finance_user_allowed(123));
+        assert!(config.is_finance_user_allowed(789));
+    }
+
+    #[test]
+    #[serial]
+    fn test_finance_token_required_when_enabled() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+finance:
+  enabled: true
+git:
+  sync_enabled: false
+"#,
+                vault_dir.display()
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        let old_finance_token = env::var("FINANCE_TELOXIDE_TOKEN").ok();
+        env::remove_var("FINANCE_TELOXIDE_TOKEN");
+
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("OPENROUTER_API_KEY", "test_openrouter");
+        env::set_var("OPENAI_API_KEY", "test_openai");
+
+        // Should fail due to missing FINANCE_TELOXIDE_TOKEN
+        let result = Config::load();
+
+        restore_env(old_env);
+        if let Some(t) = old_finance_token {
+            env::set_var("FINANCE_TELOXIDE_TOKEN", t);
+        } else {
+            env::remove_var("FINANCE_TELOXIDE_TOKEN");
+        }
+
+        match result {
+            Err(ConfigError::Missing("FINANCE_TELOXIDE_TOKEN")) => Ok(()),
+            _ => Err("Expected ConfigError::Missing(FINANCE_TELOXIDE_TOKEN)".to_string()),
         }
     }
 }

@@ -146,7 +146,43 @@ async fn main() {
         "Bot configured"
     );
 
-    // Build dispatcher
+    // Start concurrent Finance Bot if enabled
+    let _finance_task = if config.finance.enabled {
+        let finance_token = config
+            .finance_teloxide_token
+            .clone()
+            .expect("Missing FINANCE_TELOXIDE_TOKEN when finance bot is enabled");
+
+        info!("Starting Finance Bot...");
+        let finance_bot = Bot::new(finance_token);
+        let finance_handler = handlers::finance::schema();
+
+        let config_clone = config.clone();
+        let ai_service_clone = ai_service.clone();
+        let sync_notifier_clone = sync_notifier.clone();
+
+        Some(tokio::spawn(async move {
+            Dispatcher::builder(finance_bot, finance_handler)
+                .dependencies(dptree::deps![
+                    config_clone,
+                    ai_service_clone,
+                    sync_notifier_clone
+                ])
+                .default_handler(|upd| async move {
+                    warn!(update_id = upd.id.0, "Finance Bot: Unhandled update");
+                })
+                .error_handler(LoggingErrorHandler::with_custom_text(
+                    "Error in Finance Bot handler",
+                ))
+                .build()
+                .dispatch()
+                .await;
+        }))
+    } else {
+        None
+    };
+
+    // Build dispatcher for primary bot
     let handler = schema();
 
     Dispatcher::builder(bot, handler)

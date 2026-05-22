@@ -50,7 +50,9 @@ impl AiProvider for WhisperClient {
         _model: &str,
         _guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
-        Err(AiError::UnsupportedCapability("Classification not supported by Whisper provider".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "Classification not supported by Whisper provider".to_string(),
+        ))
     }
 
     async fn classify_image(
@@ -61,7 +63,9 @@ impl AiProvider for WhisperClient {
         _model: &str,
         _guide: Option<&str>,
     ) -> Result<ClassifiedNote, AiError> {
-        Err(AiError::UnsupportedCapability("Image classification not supported by Whisper provider".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "Image classification not supported by Whisper provider".to_string(),
+        ))
     }
 
     async fn summarize_url(
@@ -71,7 +75,9 @@ impl AiProvider for WhisperClient {
         _model: &str,
         _guide: Option<&str>,
     ) -> Result<UrlSummary, AiError> {
-        Err(AiError::UnsupportedCapability("URL summarization not supported by Whisper provider".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "URL summarization not supported by Whisper provider".to_string(),
+        ))
     }
 
     async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String, AiError> {
@@ -143,7 +149,9 @@ impl AiProvider for WhisperClient {
         _video_title: &str,
         _model: &str,
     ) -> Result<String, AiError> {
-        Err(AiError::UnsupportedCapability("Transcript formatting not supported by Whisper provider".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "Transcript formatting not supported by Whisper provider".to_string(),
+        ))
     }
 
     async fn chat_completion(

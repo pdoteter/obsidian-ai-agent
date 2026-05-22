@@ -9,12 +9,13 @@
 - **Appends** the structured entry to the user's Obsidian Daily Note.
 - **Summarizes URLs** and optionally extracts full YouTube transcripts.
 - **Synchronizes** the vault using Git with automated conflict resolution.
+- **Manages a Financial Portfolio**: Optionally runs a concurrent, dedicated Telegram bot/handler to parse buy/sell positions, perform trade ledger updates, embed chart attachments/photos, and answer natural language portfolio Q&A using AI.
 
 ### Core Architecture
-- **`src/main.rs`**: Entry point and Telegram update dispatcher.
-- **`src/handlers/`**: Type-specific message processing (Text, Voice, Photo, URL).
+- **`src/main.rs`**: Entry point, configuration loading, and dispatcher setup for both the primary daily note bot and the secondary finance bot.
+- **`src/handlers/`**: Type-specific message processing (Text, Voice, Photo, URL, and the dedicated Financial Bot handler in `src/handlers/finance.rs`).
 - **`src/ai/`**: Clients for OpenRouter (classification) and Whisper (transcription).
-- **`src/vault/`**: Obsidian-specific logic, including Daily Note template parsing and Frontmatter management.
+- **`src/vault/`**: Obsidian-specific logic, including Daily Note template parsing, Frontmatter management, and equity position note updates.
 - **`src/git/`**: Automated Git sync, debouncing, and a Telegram-based conflict resolution workflow.
 
 ## Building and Running
@@ -45,14 +46,17 @@ The project includes a `Dockerfile` and `docker-compose.yaml` for easy deploymen
 - **Configuration**:
     - **Secrets**: Managed via `.env` files (never commit these).
     - **Settings**: Managed via `config.yaml`.
-    - **AI Behavior**: Custom rules are defined in `system-guide.md`.
+    - **AI Behavior**: Custom rules are defined in `system-guide.md` (for the primary bot) and `finance-system-guide.md` (for the finance bot).
 - **Testing**: Includes unit tests (especially for config and vault logic). Always check for existing tests in the module you are modifying.
 - **Vault Integrity**: Operations on the vault are performed via `DailyNoteManager` and `VaultWriter` to ensure consistent formatting and template adherence.
 
 ## Key Files
 
 - `config.yaml.example`: Template for application settings.
-- `system-guide.md`: Instructions for the AI classifier.
+- `system-guide.md`: Instructions for the main daily note AI classifier.
+- `finance-system-guide.md`: Custom prompt guide and rules for the finance AI model.
 - `src/vault/daily_note.rs`: Core logic for managing Obsidian daily notes.
 - `src/git/sync.rs`: Git synchronization implementation.
 - `src/handlers/url.rs`: Extensive URL and YouTube processing logic.
+- `src/handlers/finance.rs`: Full handler logic for financial trade parsing and Q&A.
+
