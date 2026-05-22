@@ -47,6 +47,7 @@ struct FinanceClassification {
     msg_type: String, // "transaction", "question", "unknown"
     symbol: Option<String>,
     is_general_question: bool,
+    is_sell: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -367,6 +368,7 @@ async fn handle_text_inner(
                 text,
                 photo_wiki_link,
                 source,
+                classification.is_sell.unwrap_or(false),
             )
             .await
             {
@@ -451,11 +453,14 @@ Analyze the user's message and determine:
 2. Is it a position transaction (buy, sell, open, close, entry, exit, forwarded trading signal, etc.)?
 3. Is it unknown/other?
 
+For transaction types, also determine if it is a sell/close order (e.g. sell, close, exit, short).
+
 You must respond with a JSON object in this exact format:
 {
   "type": "question" | "transaction" | "unknown",
   "symbol": "extracted asset symbol in uppercase, e.g. AAPL, BTC, or null if none/general",
-  "is_general_question": true | false
+  "is_general_question": true | false,
+  "is_sell": true | false | null
 }
 
 Do not include any explanation or markdown formatting in your response. Return raw JSON only."#;
@@ -486,6 +491,57 @@ Do not include any explanation or markdown formatting in your response. Return r
 }
 
 /// Process transaction update, read note, call LLM to update ledger, write note
+struct PositionCheck {
+    has_position: bool,
+    account: Option<String>,
+}
+
+fn check_existing_position(note_content: &str) -> PositionCheck {
+    let (frontmatter, _) = crate::vault::frontmatter::parse_frontmatter(note_content);
+    let mut has_position = false;
+    let mut account = None;
+
+    if let Some(yaml) = frontmatter {
+        if let Some(map) = yaml.as_mapping() {
+            // Check position_size
+            let pos_size = map.get(&serde_yml::Value::String("position_size".to_string()))
+                .and_then(|v| {
+                    v.as_f64()
+                        .or_else(|| v.as_i64().map(|i| i as f64))
+                })
+                .unwrap_or(0.0);
+            
+            // Check status
+            let status = map.get(&serde_yml::Value::String("status".to_string()))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            if pos_size > 0.0 || status == "open" {
+                has_position = true;
+            }
+
+            // Look for account/broker/portfolio in frontmatter (case-insensitive keys)
+            for (key, val) in map.iter() {
+                if let Some(k_str) = key.as_str() {
+                    let k_lower = k_str.to_lowercase();
+                    if k_lower == "account" || k_lower == "broker" || k_lower == "portfolio" {
+                        if let Some(v_str) = val.as_str() {
+                            account = Some(v_str.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    PositionCheck {
+        has_position,
+        account,
+    }
+}
+
+/// Process transaction update, read note, call LLM to update ledger, write note
 async fn handle_transaction_update(
     ai_service: Arc<AiService>,
     config: &Config,
@@ -493,6 +549,7 @@ async fn handle_transaction_update(
     new_transaction_text: &str,
     photo_wiki_link: Option<String>,
     source: Option<String>,
+    is_sell: bool,
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let finance_dir = config.vault_path.join(&config.finance.folder);
     if !finance_dir.exists() {
@@ -506,6 +563,17 @@ async fn handle_transaction_update(
     } else {
         String::new()
     };
+
+    // Check position before updating if it's classified as a sell order
+    let mut warning_prefix = String::new();
+    if is_sell {
+        let check = check_existing_position(&current_note_content);
+        if !check.has_position {
+            warning_prefix.push_str("⚠️ Note: You do not have an active open position for this asset in your ledger.\n\n");
+        } else if let Some(acct) = check.account {
+            warning_prefix.push_str(&format!("ℹ️ Active position found in account: **{}**.\n\n", acct));
+        }
+    }
 
     let finance_guide = load_finance_guide(&config.finance.guide_path).await;
 
@@ -579,7 +647,12 @@ Please update the note and return the JSON object."#
     // Write updated content back to note
     tokio::fs::write(&note_path, &parsed.updated_content).await?;
 
-    Ok(parsed.reply)
+    let mut final_reply = parsed.reply;
+    if !warning_prefix.is_empty() {
+        final_reply = format!("{}{}", warning_prefix, final_reply);
+    }
+
+    Ok(final_reply)
 }
 
 /// Answer natural language portfolio question
@@ -756,5 +829,47 @@ mod tests {
         let raw_no_json = "```\n{\n  \"type\": \"transaction\"\n}\n```";
         let cleaned_no_json = clean_json_response(raw_no_json);
         assert_eq!(cleaned_no_json, "{\n  \"type\": \"transaction\"\n}");
+    }
+
+    #[test]
+    fn test_check_existing_position_open() {
+        let content = "---\nsymbol: AAPL\nstatus: open\nposition_size: 15\naverage_entry: 150.0\naccount: Personal Port\n---";
+        let res = check_existing_position(content);
+        assert!(res.has_position);
+        assert_eq!(res.account, Some("Personal Port".to_string()));
+    }
+
+    #[test]
+    fn test_check_existing_position_open_with_broker() {
+        let content = "---\nsymbol: TSLA\nstatus: open\nposition_size: 5\naverage_entry: 200.0\nbroker: Interactive Brokers\n---";
+        let res = check_existing_position(content);
+        assert!(res.has_position);
+        assert_eq!(res.account, Some("Interactive Brokers".to_string()));
+    }
+
+    #[test]
+    fn test_check_existing_position_open_with_portfolio() {
+        let content = "---\nsymbol: BTC\nstatus: open\nposition_size: 0.5\naverage_entry: 60000.0\nportfolio: Crypto Wallet\n---";
+        let res = check_existing_position(content);
+        assert!(res.has_position);
+        assert_eq!(res.account, Some("Crypto Wallet".to_string()));
+    }
+
+    #[test]
+    fn test_check_existing_position_closed() {
+        let content = "---\nsymbol: AAPL\nstatus: closed\nposition_size: 0\naverage_entry: 0\naccount: Personal Port\n---";
+        let res = check_existing_position(content);
+        assert!(!res.has_position);
+    }
+
+    #[test]
+    fn test_check_existing_position_empty_and_no_frontmatter() {
+        let res_empty = check_existing_position("");
+        assert!(!res_empty.has_position);
+        assert_eq!(res_empty.account, None);
+
+        let res_no_fm = check_existing_position("# AAPL Ledger\nSome content");
+        assert!(!res_no_fm.has_position);
+        assert_eq!(res_no_fm.account, None);
     }
 }
