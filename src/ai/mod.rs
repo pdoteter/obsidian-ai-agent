@@ -81,7 +81,7 @@ impl AiService {
                 .transcription
                 .provider
                 .clone()
-                .unwrap_or_else(|| config.ai_provider.clone()),
+                .unwrap_or_else(|| "openai".to_string()),
             classification_provider: config
                 .classification
                 .provider
@@ -278,6 +278,12 @@ mod tests {
                 name: "default".to_string(),
             }),
         );
+        providers.insert(
+            "openai".to_string(),
+            Arc::new(MockProvider {
+                name: "openai".to_string(),
+            }),
+        );
 
         let mut config = Config::default();
         config.ai_provider = "default".to_string();
@@ -287,7 +293,7 @@ mod tests {
 
         assert_eq!(
             service.transcribe(&[]).await.unwrap(),
-            "transcribed by default"
+            "transcribed by openai"
         );
         assert_eq!(
             service
