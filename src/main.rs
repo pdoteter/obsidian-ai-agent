@@ -19,6 +19,7 @@ use tracing::{error, info, warn};
 
 use ai::providers::openai_whisper::WhisperClient;
 use ai::providers::openrouter::OpenRouterClient;
+use ai::providers::gemini::GeminiClient;
 use ai::{AiProvider, AiService};
 use config::Config;
 use git::chat_tracker;
@@ -83,6 +84,19 @@ async fn main() {
         }
     };
     providers.insert("openai".to_string(), whisper);
+
+    // Google Gemini Provider (Optional on startup, warning only if credentials missing)
+    match GeminiClient::new(
+        config.gemini_api_key.clone(),
+        config.gemini_service_account_key_path.clone(),
+    ).await {
+        Ok(c) => {
+            providers.insert("gemini".to_string(), Arc::new(c));
+        }
+        Err(e) => {
+            warn!(error = %e, "Gemini client could not be initialized on startup");
+        }
+    }
 
     // Initialize AI Service (Orchestrator)
     let ai_service = Arc::new(AiService::new(providers, &config));

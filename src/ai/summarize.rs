@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::error::AiError;
 use crate::url::PageContent;
 
 /// The structured output from AI URL summarization

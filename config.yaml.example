@@ -16,9 +16,10 @@ git:
 
 # AI model settings (optional — defaults shown)
 ai:
+  provider: openrouter                    # openrouter | gemini (default: openrouter)
   whisper_model: whisper-1                # OpenAI Whisper model for transcription
   whisper_language: nl                    # ISO-639-1 language code (e.g. nl, en, de)
-  classify_model: google/gemini-2.5-flash # OpenRouter model for classification
+  classify_model: google/gemini-2.5-flash # AI model for classification (e.g., gemini-1.5-flash, google/gemini-2.5-flash)
 
 # Access control (optional — empty list allows all users)
 access:

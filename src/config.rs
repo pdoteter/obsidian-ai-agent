@@ -197,6 +197,8 @@ pub struct Config {
     pub teloxide_token: String,
     pub openrouter_api_key: String,
     pub openai_api_key: String,
+    pub gemini_api_key: Option<String>,
+    pub gemini_service_account_key_path: Option<PathBuf>,
     pub vault_path: PathBuf,
     pub git_sync_enabled: bool,
     pub git_path: Option<PathBuf>,
@@ -229,6 +231,8 @@ impl Default for Config {
             teloxide_token: String::new(),
             openrouter_api_key: String::new(),
             openai_api_key: String::new(),
+            gemini_api_key: None,
+            gemini_service_account_key_path: None,
             vault_path: PathBuf::from("."),
             git_sync_enabled: false,
             git_path: None,
@@ -268,6 +272,10 @@ impl Config {
             .map_err(|_| ConfigError::Missing("OPENROUTER_API_KEY"))?;
         let openai_api_key =
             env::var("OPENAI_API_KEY").map_err(|_| ConfigError::Missing("OPENAI_API_KEY"))?;
+        let gemini_api_key = env::var("GEMINI_API_KEY").ok();
+        let gemini_service_account_key_path = env::var("GEMINI_SERVICE_ACCOUNT_KEY_PATH")
+            .ok()
+            .map(PathBuf::from);
 
         // Load settings from YAML config file
         let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
@@ -341,6 +349,8 @@ impl Config {
             teloxide_token,
             openrouter_api_key,
             openai_api_key,
+            gemini_api_key,
+            gemini_service_account_key_path,
             vault_path,
             git_sync_enabled: file.git.sync_enabled,
             git_path,
@@ -707,18 +717,31 @@ git:
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
+        Option<String>,
     ) {
         let old_config = env::var("CONFIG_PATH").ok();
         let old_teloxide = env::var("TELOXIDE_TOKEN").ok();
         let old_openrouter = env::var("OPENROUTER_API_KEY").ok();
         let old_openai = env::var("OPENAI_API_KEY").ok();
+        let old_gemini = env::var("GEMINI_API_KEY").ok();
+        let old_gemini_sa = env::var("GEMINI_SERVICE_ACCOUNT_KEY_PATH").ok();
 
         env::remove_var("CONFIG_PATH");
         env::remove_var("TELOXIDE_TOKEN");
         env::remove_var("OPENROUTER_API_KEY");
         env::remove_var("OPENAI_API_KEY");
+        env::remove_var("GEMINI_API_KEY");
+        env::remove_var("GEMINI_SERVICE_ACCOUNT_KEY_PATH");
 
-        (old_config, old_teloxide, old_openrouter, old_openai)
+        (
+            old_config,
+            old_teloxide,
+            old_openrouter,
+            old_openai,
+            old_gemini,
+            old_gemini_sa,
+        )
     }
 
     fn restore_env(
@@ -727,9 +750,18 @@ git:
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
+            Option<String>,
         ),
     ) {
-        let (old_config, old_teloxide, old_openrouter, old_openai) = old_env;
+        let (
+            old_config,
+            old_teloxide,
+            old_openrouter,
+            old_openai,
+            old_gemini,
+            old_gemini_sa,
+        ) = old_env;
         match old_config {
             Some(v) => env::set_var("CONFIG_PATH", v),
             None => env::remove_var("CONFIG_PATH"),
@@ -745,6 +777,14 @@ git:
         match old_openai {
             Some(v) => env::set_var("OPENAI_API_KEY", v),
             None => env::remove_var("OPENAI_API_KEY"),
+        }
+        match old_gemini {
+            Some(v) => env::set_var("GEMINI_API_KEY", v),
+            None => env::remove_var("GEMINI_API_KEY"),
+        }
+        match old_gemini_sa {
+            Some(v) => env::set_var("GEMINI_SERVICE_ACCOUNT_KEY_PATH", v),
+            None => env::remove_var("GEMINI_SERVICE_ACCOUNT_KEY_PATH"),
         }
     }
 

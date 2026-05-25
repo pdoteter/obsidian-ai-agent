@@ -120,8 +120,10 @@ See the included `system-guide.md` for an example.
 |----------|----------|-------------|
 | `TELOXIDE_TOKEN` | ✅ | Telegram Bot API token |
 | `FINANCE_TELOXIDE_TOKEN` | ❌ | Telegram Bot API token for the finance bot (required only if finance bot is enabled) |
-| `OPENROUTER_API_KEY` | ✅ | OpenRouter API key (classification) |
+| `OPENROUTER_API_KEY` | ❌ | OpenRouter API key (required if `ai.provider: openrouter`) |
 | `OPENAI_API_KEY` | ✅ | OpenAI API key (Whisper transcription) |
+| `GEMINI_API_KEY` | ❌ | Google AI Studio API key (required for Gemini standard API Key auth) |
+| `GEMINI_SERVICE_ACCOUNT_KEY_PATH` | ❌ | Path to a Google Cloud Service Account JSON key (for Gemini OAuth 2.0 auth) |
 | `CONFIG_PATH` | ❌ | Path to config file (default: `./config.yaml`) |
 
 ### Settings (`config.yaml`)
@@ -138,9 +140,10 @@ git:
   sync_debounce_secs: 300                   # default: 300
 
 ai:
+  provider: openrouter                      # AI provider: openrouter | gemini (default: openrouter)
   whisper_model: whisper-1                  # default: whisper-1
   whisper_language: nl                      # optional, ISO-639-1
-  classify_model: google/gemini-2.5-flash   # default: google/gemini-2.5-flash
+  classify_model: google/gemini-2.5-flash   # default: google/gemini-2.5-flash (e.g. gemini-1.5-flash if provider is gemini)
 
 access:
   allowed_user_ids: []                      # default: [] (allow all)
@@ -168,9 +171,10 @@ log_level: info                             # default: info
 | `git.branch` | ❌ | Git branch (default: `main`) |
 | `git.ssh_key_path` | ❌ | SSH key path (default: auto-detect) |
 | `git.sync_debounce_secs` | ❌ | Debounce sync timer in seconds (default: 300) |
+| `ai.provider` | ❌ | AI provider selection: `openrouter` or `gemini` (default: `openrouter`) |
 | `ai.whisper_model` | ❌ | Whisper model for voice transcription (default: `whisper-1`) |
 | `ai.whisper_language` | ❌ | Language code for Whisper (default: auto-detect) |
-| `ai.classify_model` | ❌ | OpenRouter model for classification (default: `google/gemini-2.5-flash`) |
+| `ai.classify_model` | ❌ | Classification model name (default: `google/gemini-2.5-flash` for OpenRouter, or e.g. `gemini-1.5-flash` for Gemini) |
 | `access.allowed_user_ids` | ❌ | Allowed Telegram user IDs (default: `[]` = all users) |
 | `guide_path` | ❌ | Path to custom AI guide file (default: `./system-guide.md`) |
 | `image.max_dimension` | ❌ | Maximum image dimension in pixels (default: 1280) |
@@ -205,13 +209,14 @@ These models are available via the OpenAI `/v1/audio/transcriptions` endpoint:
 
 ### Classification (`ai.classify_model`)
 
-These models are available via [OpenRouter](https://openrouter.ai/models). Classification is a lightweight task, so fast/cheap models work well:
+These models are available via [OpenRouter](https://openrouter.ai/models) (if `ai.provider: openrouter`) or natively via Google Gemini (if `ai.provider: gemini`). Classification is a lightweight task, so fast/cheap models work well:
 
 | Model | Input $/M tokens | Notes |
 |-------|-------------------|-------|
-| `google/gemini-2.5-flash` | $0.30 | **Current default** — good balance of speed, quality, and cost |
+| `google/gemini-2.5-flash` | $0.30 | **Current OpenRouter default** — good balance of speed, quality, and cost |
+| `gemini-1.5-flash` / `gemini-2.5-flash` | - | **Gemini native defaults** — very fast and cost-effective |
 | `google/gemini-2.0-flash-lite-001` | $0.25 | Cheaper alternative, 2.5× faster time-to-first-token |
 | `anthropic/claude-haiku-3.5` | $1.00 | Higher quality instruction following, more expensive |
 | `deepseek/deepseek-chat-v3-0324` | $0.27 | Near-frontier quality at low cost |
 
-For classification tasks (short input, structured output), the default `google/gemini-2.5-flash` is a solid choice. Switch to a cheaper model if you process high volumes, or a more capable model if classification accuracy is critical.
+For classification tasks (short input, structured output), `gemini-1.5-flash` or `google/gemini-2.5-flash` are solid choices. Switch to a cheaper model if you process high volumes, or a more capable model if classification accuracy is critical.
