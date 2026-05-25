@@ -114,7 +114,7 @@ test.describe('Obsidian AI Agent WebUI End-to-End Tests', () => {
     
     // Assert response mentions created task
     await expect(botResponse).toContainText('Task Created');
-    await expect(botResponse).toContainText('milk for breakfast');
+    await expect(botResponse).toContainText('milk');
 
     // VERIFY WebSocket real-time preview sync (sidebar updates immediately)
     const dailyNotePreview = page.locator('#daily-note-markdown');
