@@ -48,3 +48,9 @@ log_level: info
 #   guide_path: ./finance-system-guide.md    # Path to custom finance AI guide rules (optional, falls back to built-in rules)
 #   allowed_user_ids: []                     # Finance bot authorized user IDs (optional, falls back to access.allowed_user_ids if empty)
 
+# WebUI Portal settings (optional — defaults shown)
+webui:
+  enabled: true                            # Enable/disable the secure companion WebUI (default: true)
+  port: 3000                               # Local port to host the WebUI server (default: 3000)
+
+
