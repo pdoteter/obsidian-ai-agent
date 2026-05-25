@@ -8,6 +8,7 @@ mod image;
 mod url;
 mod utils;
 mod vault;
+mod webui;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,15 +140,62 @@ async fn main() {
         None
     };
 
+    // Create broadcast channel for real-time vault update signals
+    let (update_tx, _) = tokio::sync::broadcast::channel::<()>(100);
+
     // Initialize vault manager (loads daily note settings from .obsidian/daily-notes.json)
     let vault = Arc::new(
         DailyNoteManager::new(
             config.vault_path.clone(),
             config.date_display_format.clone(),
             sync_notifier.clone(),
+            Some(update_tx),
         )
         .await,
     );
+
+    // Start concurrent WebUI Server if enabled
+    let _webui_task = if config.webui_enabled {
+        // Resolve authentication token: if None, generate a random secure passcode and print it
+        let auth_token = match &config.webui_auth_token {
+            Some(t) => {
+                info!("WebUI: Using configured authentication token");
+                Some(t.clone())
+            }
+            None => {
+                let generated: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+                info!("**********************************************************");
+                info!("⚠️  WebUI: No WEBUI_AUTH_TOKEN configured!");
+                info!("🔑 Generated temporary Access Token: {}", generated);
+                info!("👉 Access the portal at: http://127.0.0.1:{}?token={}", config.webui_port, generated);
+                info!("**********************************************************");
+                Some(generated)
+            }
+        };
+
+        // Create updated config with the resolved token so server has it
+        let mut server_config = (*config).clone();
+        server_config.webui_auth_token = auth_token;
+        let server_config = Arc::new(server_config);
+
+        let (ws_broadcast, _) = tokio::sync::broadcast::channel::<webui::server::WebuiEvent>(100);
+
+        let webui_state = webui::server::WebuiState {
+            config: server_config,
+            ai_service: ai_service.clone(),
+            vault: vault.clone(),
+            sync_notifier: sync_notifier.clone(),
+            ws_broadcast,
+        };
+
+        let port = config.webui_port;
+        Some(tokio::spawn(async move {
+            webui::server::start_server(webui_state, port).await;
+        }))
+    } else {
+        info!("WebUI: Disabled (webui.enabled=false)");
+        None
+    };
 
     info!(
         vault_path = %config.vault_path.display(),

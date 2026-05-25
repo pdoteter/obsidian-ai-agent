@@ -10,3 +10,5 @@ config.docker.yaml
 Obsidian/
 
 target-f1-audit/
+
+e2e-tests/node_modules/**

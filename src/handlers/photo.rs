@@ -70,15 +70,52 @@ pub async fn handle_photo_message(
     bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto)
         .await?;
 
+    // Process the photo entry (resize, EXIF extract, classify, save, append, notify sync)
+    let process_result = process_photo_entry(
+        &bytes,
+        caption.as_deref(),
+        &config,
+        &ai_service,
+        &vault,
+        sync_notifier.as_ref(),
+    )
+    .await;
+
+    match process_result {
+        Ok((_filename, summary)) => {
+            // 16. Send confirmation
+            bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
+                .await?;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to process photo entry");
+            bot.send_message(msg.chat.id, format!("❌ Failed to save photo: {}", e))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Process a photo entry: resize → EXIF → classify via Vision AI → save to vault → write to note.
+/// Returns the saved filename and classification summary.
+pub async fn process_photo_entry(
+    bytes: &[u8],
+    caption: Option<&str>,
+    config: &Config,
+    ai_service: &AiService,
+    vault: &DailyNoteManager,
+    sync_notifier: Option<&SyncNotifier>,
+) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     // 5. Resize
     let resized =
-        crate::image::process::resize_image(&bytes, config.image.max_dimension).map_err(|e| {
+        crate::image::process::resize_image(bytes, config.image.max_dimension).map_err(|e| {
             error!(error = %e, "Failed to resize photo");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
     // 6. EXIF from original bytes
-    let exif_data = crate::image::exif::extract_exif(&bytes);
+    let exif_data = crate::image::exif::extract_exif(bytes);
 
     // 7. Format EXIF context
     let exif_context = crate::image::exif::format_exif_context(&exif_data);
@@ -91,7 +128,7 @@ pub async fn handle_photo_message(
     let classified = ai_service
         .classify_image(
             &base64,
-            caption.as_deref(),
+            caption,
             &exif_context,
             &config.openrouter_model_classify,
             guide.as_deref(),
@@ -99,7 +136,6 @@ pub async fn handle_photo_message(
         .await;
 
     // 10. Generate filename (with fallback on AI failure)
-    // Use a path-safe date format for filenames (not date_display_format which may contain '/')
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let (filename, summary) = match &classified {
@@ -114,7 +150,7 @@ pub async fn handle_photo_message(
             error!(error = %e, "Image classification failed, using fallback filename/content");
             (
                 generate_fallback_filename(&today),
-                caption.clone().unwrap_or_else(|| "Photo".to_string()),
+                caption.unwrap_or("Photo").to_string(),
             )
         }
     };
@@ -164,7 +200,7 @@ pub async fn handle_photo_message(
             &config.image.assets_folder,
             &filename,
             None,
-            caption.as_deref(),
+            caption,
         ),
     };
 
@@ -193,11 +229,7 @@ pub async fn handle_photo_message(
         notifier.notify();
     }
 
-    // 16. Send confirmation
-    bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
-        .await?;
-
-    Ok(())
+    Ok((filename, summary))
 }
 
 fn format_photo_content(

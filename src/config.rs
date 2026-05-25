@@ -43,6 +43,9 @@ struct FileConfig {
 
     #[serde(default)]
     finance: FinanceConfig,
+
+    #[serde(default)]
+    pub webui: WebuiConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,6 +226,9 @@ pub struct Config {
     pub ack: AckConfig,
     pub finance: FinanceConfig,
     pub finance_teloxide_token: Option<String>,
+    pub webui_enabled: bool,
+    pub webui_port: u16,
+    pub webui_auth_token: Option<String>,
 }
 
 impl Default for Config {
@@ -256,6 +262,9 @@ impl Default for Config {
             ack: AckConfig::default(),
             finance: FinanceConfig::default(),
             finance_teloxide_token: None,
+            webui_enabled: true,
+            webui_port: 3000,
+            webui_auth_token: None,
         }
     }
 }
@@ -345,6 +354,9 @@ impl Config {
             env::var("FINANCE_TELOXIDE_TOKEN").ok()
         };
 
+        // Read WebUI secret from environment if enabled
+        let webui_auth_token = env::var("WEBUI_AUTH_TOKEN").ok();
+
         Ok(Config {
             teloxide_token,
             openrouter_api_key,
@@ -374,6 +386,9 @@ impl Config {
             ack: file.ack,
             finance,
             finance_teloxide_token,
+            webui_enabled: file.webui.enabled,
+            webui_port: file.webui.port,
+            webui_auth_token,
         })
     }
 
@@ -475,6 +490,22 @@ impl Default for FinanceConfig {
             assets_folder: "Assets".to_string(),
             guide_path: None,
             allowed_user_ids: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default)]
+pub struct WebuiConfig {
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for WebuiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 3000,
         }
     }
 }
