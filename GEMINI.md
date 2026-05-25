@@ -50,6 +50,7 @@ The project includes a `Dockerfile` and `docker-compose.yaml` for easy deploymen
     - **Settings**: Managed via `config.yaml`.
     - **AI Behavior**: Custom rules are defined in `system-guide.md` (for the primary bot) and `finance-system-guide.md` (for the finance bot).
 - **Testing**: Includes unit tests (especially for config and vault logic). Always check for existing tests in the module you are modifying.
+- **Pull Requests**: Always run the complete End-to-End integration test suite (via `./run-e2e.ps1`) before initiating, preparing, or submitting any Pull Request to ensure that all core WebUI, WebSocket, and Telegram capturing features operate successfully under live AI mock runs.
 - **Vault Integrity**: Operations on the vault are performed via `DailyNoteManager` and `VaultWriter` to ensure consistent formatting and template adherence.
 
 ## Key Files
