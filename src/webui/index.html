@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obsidian AI Agent Portal</title>
+    <!-- Premium Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/app.css">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div id="app" class="app-container">
+        <!-- Auth Lock Gateway Screen -->
+        <div id="auth-gateway" class="gateway-screen hidden">
+            <div class="glass-card auth-card">
+                <div class="auth-header">
+                    <div class="logo-orb">
+                        <i data-lucide="shield-check" class="logo-icon"></i>
+                    </div>
+                    <h2>Secure Access Gateway</h2>
+                    <p>Enter your WebUI Access Token to sync with your Obsidian Vault</p>
+                </div>
+                <form id="auth-form" class="auth-form">
+                    <div class="input-group">
+                        <i data-lucide="key" class="input-icon"></i>
+                        <input type="password" id="passcode-input" placeholder="Passcode/Token" required>
+                    </div>
+                    <button type="submit" class="premium-btn">
+                        <span>Authorize Session</span>
+                        <i data-lucide="arrow-right"></i>
+                    </button>
+                    <div id="auth-error" class="error-msg hidden">Invalid Access Token. Please try again.</div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Split Screen -->
+        <main class="dashboard-layout">
+            <!-- Sidebar: Real-time Live Vault daily note -->
+            <section class="sidebar-panel glass-card">
+                <div class="panel-header">
+                    <div class="header-title">
+                        <i data-lucide="book-open" class="header-icon"></i>
+                        <h3>Obsidian Daily Note</h3>
+                    </div>
+                    <span id="sync-badge" class="badge idle">
+                        <span class="pulse-dot"></span>
+                        <span id="sync-status-text">Synced</span>
+                    </span>
+                </div>
+                <div class="daily-note-meta">
+                    <div class="meta-item">
+                        <i data-lucide="calendar"></i>
+                        <span id="note-date">Loading date...</span>
+                    </div>
+                </div>
+                <div class="daily-note-content-wrapper">
+                    <div id="daily-note-markdown" class="markdown-preview">
+                        <p class="placeholder-text">Syncing with your vault daily notes...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Main Panel: Interactive Messenger -->
+            <section class="chat-panel glass-card">
+                <div class="panel-header">
+                    <div class="header-title">
+                        <div class="bot-avatar">
+                            <i data-lucide="bot"></i>
+                        </div>
+                        <div>
+                            <h3>Obsidian AI Agent</h3>
+                            <span class="bot-subtext">Online & Processing</span>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button id="logout-btn" class="icon-btn" title="Lock Portal">
+                            <i data-lucide="lock"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Chat History Window -->
+                <div id="chat-messages" class="chat-scroller">
+                    <div class="msg-bubble system">
+                        <div class="msg-content">
+                            <p>👋 Welcome to the Obsidian AI Agent Web Portal. Direct inputs here bypass Telegram and write immediately into your Daily Note with full AI classification.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Media Preview Bar (Translucent box for uploaded image preview) -->
+                <div id="media-preview-container" class="media-preview-container hidden">
+                    <div class="preview-card glass-card">
+                        <img id="image-preview" src="#" alt="Upload Preview">
+                        <button id="clear-preview-btn" class="close-btn">
+                            <i data-lucide="x"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Typing / Processing Indicator -->
+                <div id="processing-indicator" class="processing-row hidden">
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <span id="processing-text" class="processing-text">AI is thinking...</span>
+                </div>
+
+                <!-- Chat Input Controls -->
+                <div class="input-panel">
+                    <form id="chat-form" class="input-form">
+                        <!-- Attachment Upload Button -->
+                        <div class="attachment-ctrl">
+                            <input type="file" id="file-upload" accept="image/*,audio/*" class="hidden">
+                            <button type="button" id="attach-btn" class="icon-btn tooltip" title="Attach Image or Audio">
+                                <i data-lucide="paperclip"></i>
+                            </button>
+                        </div>
+
+                        <!-- Main Input Area -->
+                        <div class="text-input-wrapper">
+                            <textarea id="message-input" placeholder="Type a note, task, or paste a link..." rows="1"></textarea>
+                        </div>
+
+                        <!-- Recording State View -->
+                        <div id="recording-overlay" class="recording-overlay hidden">
+                            <span class="recording-pulse"></span>
+                            <span id="recording-timer">00:00</span>
+                            <span class="recording-label">Recording Voice Note...</span>
+                        </div>
+
+                        <!-- Action Controls (Record Voice & Send) -->
+                        <div class="action-ctrls">
+                            <button type="button" id="record-btn" class="icon-btn tooltip" title="Record Voice">
+                                <i data-lucide="mic" id="mic-icon"></i>
+                            </button>
+                            <button type="submit" id="send-btn" class="send-btn">
+                                <i data-lucide="send"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="/app.js"></script>
+</body>
+</html>

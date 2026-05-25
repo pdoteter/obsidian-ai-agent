@@ -231,6 +231,7 @@ pub struct DailyNoteManager {
     /// Chrono strftime format for {{date}}/{{title}} in templates
     date_display_format: String,
     sync_notifier: Option<SyncNotifier>,
+    update_tx: Option<tokio::sync::broadcast::Sender<()>>,
 }
 
 impl DailyNoteManager {
@@ -243,6 +244,7 @@ impl DailyNoteManager {
         vault_path: PathBuf,
         date_display_format: String,
         sync_notifier: Option<SyncNotifier>,
+        update_tx: Option<tokio::sync::broadcast::Sender<()>>,
     ) -> Self {
         let settings = DailyNoteSettings::load_from_vault(&vault_path).await;
         Self {
@@ -250,7 +252,13 @@ impl DailyNoteManager {
             settings,
             date_display_format,
             sync_notifier,
+            update_tx,
         }
+    }
+
+    /// Subscribe to real-time daily note writes
+    pub fn subscribe_updates(&self) -> Option<tokio::sync::broadcast::Receiver<()>> {
+        self.update_tx.as_ref().map(|tx| tx.subscribe())
     }
 
     async fn sync_before_write_if_idle(&self) {
@@ -388,6 +396,10 @@ impl DailyNoteManager {
 
         fs::write(&path, &new_content).await?;
 
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(());
+        }
+
         info!(
             path = %path.display(),
             section = section_heading,
@@ -414,6 +426,10 @@ impl DailyNoteManager {
 
         fs::write(&path, &updated_file_content).await?;
 
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(());
+        }
+
         debug!(
             path = %path.display(),
             section = section_heading,
@@ -438,6 +454,10 @@ impl DailyNoteManager {
 
         fs::write(&path, &new_content).await?;
 
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(());
+        }
+
         info!(
             path = %path.display(),
             field_count = fields.len(),
@@ -458,6 +478,10 @@ impl DailyNoteManager {
         file.write_all(b"\n").await?;
         file.write_all(content.as_bytes()).await?;
         file.write_all(b"\n").await?;
+
+        if let Some(ref tx) = self.update_tx {
+            let _ = tx.send(());
+        }
 
         info!(path = %path.display(), "Appended to daily note");
 
@@ -844,6 +868,7 @@ mod tests {
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
             sync_notifier: None,
+            update_tx: None,
         };
 
         let mut fields = HashMap::new();
@@ -875,6 +900,7 @@ mod tests {
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
             sync_notifier: None,
+            update_tx: None,
         };
 
         let fields = HashMap::new();
@@ -906,6 +932,7 @@ mod tests {
             settings: DailyNoteSettings::default(),
             date_display_format: "%Y-%m-%d".to_string(),
             sync_notifier: None,
+            update_tx: None,
         };
 
         let mut fields = HashMap::new();
@@ -934,6 +961,7 @@ mod tests {
             },
             date_display_format: "%Y-%m-%d".to_string(),
             sync_notifier: None,
+            update_tx: None,
         };
 
         let note_path = manager.ensure_today().await.unwrap();

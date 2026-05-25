@@ -58,6 +58,30 @@ A configurable, secondary Telegram bot/handler dedicated to financial portfolio 
 4. **Natural Language Portfolio Q&A**: Ask the bot questions like *"Do I have AAPL?"*, *"How large is my position?"*, or *"What are my total profits?"*. The bot reads and indexes the frontmatter and transactions across all equity notes in the Finance folder to generate clean, concise markdown answers.
 5. **Configurable Prompt Guide**: Fully customize the ledger calculations, formatting rules, and Q&A tone by creating a local markdown file (e.g., `finance-system-guide.md`) and pointing `finance.guide_path` to it.
 
+## WebUI Portal (Companion Web App)
+
+The Obsidian AI Agent includes a secure, beautiful, real-time companion WebUI web app. It runs concurrently with the Telegram bot and acts as a premium direct capture portal.
+
+### Features
+- **Modern Glassmorphic Visuals**: Fully custom Vanilla CSS dark mode styling, frosted glass filter effects, glowing borders, slide transitions, and a clean responsive split-pane layout (note preview on the left, chat console on the right).
+- **Direct Appending**: Inputs sent in the chat bypass Telegram and append instantly to your daily note, utilizing the same core classification/enrichment pipeline (Text, Voice, Photo).
+- **Real-Time WebSocket Sync**: The sidebar parses and displays your Obsidian Daily Note markdown, updating in real-time instantly when you or the Telegram bot write to the vault.
+- **Passcode Authentication Gateway**: Secured with a JWT-like bearer authorization system (configured via `WEBUI_AUTH_TOKEN` in your `.env` file).
+- **Browser-Native Ingestions**: Supports image preview files, file-dialog attachments, and microphone recording using browser-native audio capturing APIs.
+
+### Setup and Running E2E Tests
+1. Add `WEBUI_AUTH_TOKEN=your_secure_passcode` to your `.env` file.
+2. In your `config.yaml`, configure the WebUI port (defaults to 3000):
+   ```yaml
+   webui:
+     enabled: true
+     port: 3000
+   ```
+3. To run the comprehensive Playwright End-to-End integration test suite locally on Windows, execute:
+   ```powershell
+   powershell -File ./run-e2e.ps1
+   ```
+
 ## Docker
 
 Pre-built images are available on [Docker Hub](https://hub.docker.com/r/peterluxem/obsidian-ai-agent):
@@ -122,6 +146,7 @@ See the included `system-guide.md` for an example.
 | `FINANCE_TELOXIDE_TOKEN` | ❌ | Telegram Bot API token for the finance bot (required only if finance bot is enabled) |
 | `OPENROUTER_API_KEY` | ❌ | OpenRouter API key (required if `ai.provider: openrouter`) |
 | `OPENAI_API_KEY` | ✅ | OpenAI API key (Whisper transcription) |
+| `WEBUI_AUTH_TOKEN` | ❌ | Secure passcode for companion WebUI (required if WebUI is enabled) |
 | `GEMINI_API_KEY` | ❌ | Google AI Studio API key (required for Gemini standard API Key auth) |
 | `GEMINI_SERVICE_ACCOUNT_KEY_PATH` | ❌ | Path to a Google Cloud Service Account JSON key (for Gemini OAuth 2.0 auth) |
 | `CONFIG_PATH` | ❌ | Path to config file (default: `./config.yaml`) |
@@ -154,6 +179,10 @@ image:
   max_dimension: 1280                       # default: 1280
   jpeg_quality: 85                          # default: 85
   assets_folder: assets                     # default: assets
+
+webui:
+  enabled: true                             # default: true
+  port: 3000                                # default: 3000
 
 timezone: Europe/Brussels                   # default: Europe/Brussels
 date_display_format: YYYY/MM/DD             # default: YYYY/MM/DD (Moment.js syntax)
@@ -190,6 +219,8 @@ log_level: info                             # default: info
 | `finance.guide_path` | ❌ | Custom AI guide rules for finance bot (default: none, falls back to built-in rules) |
 | `finance.allowed_user_ids` | ❌ | Finance bot authorized Telegram user IDs (default: `[]` = falls back to global) |
 | `timezone` | ❌ | Timezone for timestamps (default: `Europe/Brussels`) |
+| `webui.enabled` | ❌ | Enable WebUI companion app (default: `true`) |
+| `webui.port` | ❌ | Network port for the WebUI HTTP/WS server (default: `3000`) |
 | `date_display_format` | ❌ | Moment.js format for dates (default: `YYYY/MM/DD`) |
 | `log_level` | ❌ | Log level (default: `info`) |
 

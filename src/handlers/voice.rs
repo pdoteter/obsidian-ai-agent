@@ -4,6 +4,7 @@ use teloxide::types::ChatAction;
 
 use tracing::{debug, error, info};
 
+use crate::ai::classify::{ClassifiedNote, NoteCategory};
 use crate::ai::AiService;
 use crate::audio::download;
 use crate::config::Config;
@@ -60,27 +61,63 @@ pub async fn handle_voice_message(
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-    // Step 2: Transcribe via AiService
+    // Step 2: Transcribe and process via process_voice_entry
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
 
-    let transcript = match ai_service.transcribe(&audio_bytes).await {
-        Ok(t) => t,
-        Err(e) => {
-            error!(error = %e, "Transcription failed");
-            bot.send_message(msg.chat.id, format!("❌ Transcription failed: {}", e))
-                .await?;
-            return Ok(());
+    let process_result = process_voice_entry(
+        &audio_bytes,
+        &config,
+        &ai_service,
+        &vault,
+        sync_notifier.as_ref(),
+    )
+    .await;
+
+    match process_result {
+        Ok((transcript, classified)) => {
+            // Step 5: Send confirmation
+            bot.send_message(
+                msg.chat.id,
+                format!(
+                    "✅ Voice → {} saved as {}\n\nTranscript: \"{}\"",
+                    classified.category,
+                    classified.summary,
+                    truncate(&transcript, 200),
+                ),
+            )
+            .await?;
         }
-    };
+        Err(e) => {
+            error!(error = %e, "Failed to process voice entry");
+            bot.send_message(msg.chat.id, format!("❌ Voice message processing failed: {}", e))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Process a voice entry: transcribe → classify → format → write to vault → update frontmatter → notify sync.
+/// Returns the transcript text and the ClassifiedNote.
+pub async fn process_voice_entry(
+    audio_bytes: &[u8],
+    config: &Config,
+    ai_service: &AiService,
+    vault: &DailyNoteManager,
+    sync_notifier: Option<&SyncNotifier>,
+) -> Result<(String, ClassifiedNote), Box<dyn std::error::Error + Send + Sync>> {
+    let transcript = ai_service.transcribe(audio_bytes).await.map_err(|e| {
+        error!(error = %e, "Voice transcription failed");
+        e
+    })?;
 
     info!(
         transcript_length = transcript.len(),
-        "Transcription complete"
+        "Voice transcription complete"
     );
     debug!(transcript = %transcript, "Full transcript");
 
-    // Step 3: Classify the transcribed text
     let guide = crate::ai::guide::load_guide(&config.guide_path).await;
     let classified = match ai_service
         .classify_text(
@@ -92,28 +129,31 @@ pub async fn handle_voice_message(
     {
         Ok(c) => c,
         Err(e) => {
-            error!(error = %e, "Classification failed, saving as raw log");
+            error!(error = %e, "Voice classification failed, saving as raw log");
             let (section, content) = writer::format_raw_entry(&transcript);
             vault
                 .append_to_section(section, &content)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
-            bot.send_message(
-                msg.chat.id,
-                format!(
-                    "📝 Transcribed & saved as raw log (classification failed)\n\n\"{}\"",
-                    truncate(&transcript, 200),
-                ),
-            )
-            .await?;
-            if let Some(n) = sync_notifier.as_ref() {
+
+            if let Some(n) = sync_notifier {
                 n.notify();
             }
-            return Ok(());
+
+            return Ok((
+                transcript.clone(),
+                ClassifiedNote {
+                    category: NoteCategory::Log,
+                    markdown: format!("- {}", transcript),
+                    tags: Vec::new(),
+                    summary: transcript,
+                    frontmatter: None,
+                },
+            ));
         }
     };
 
-    // Step 4: Write to vault
+    // Format and write to vault
     let (section, content) = writer::format_for_daily_note(&classified);
     vault
         .append_to_section(section, &content)
@@ -135,19 +175,7 @@ pub async fn handle_voice_message(
         notifier.notify();
     }
 
-    // Step 5: Send confirmation
-    bot.send_message(
-        msg.chat.id,
-        format!(
-            "✅ Voice → {} saved as {}\n\nTranscript: \"{}\"",
-            classified.category,
-            classified.summary,
-            truncate(&transcript, 200),
-        ),
-    )
-    .await?;
-
-    Ok(())
+    Ok((transcript, classified))
 }
 
 fn truncate(s: &str, max_len: usize) -> &str {

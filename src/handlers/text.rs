@@ -69,51 +69,94 @@ pub async fn handle_text_message(
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
 
-    // Classify the text with AI
-    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-    let classified = match ai_service
-        .classify_text(&text, &config.openrouter_model_classify, guide.as_deref())
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!(error = %e, "AI classification failed, using raw format");
-            // Fallback: write as raw log entry
-            let (section, content) = writer::format_raw_entry(&text);
-            vault.append_to_section(section, &content).await?;
-            bot.send_message(
-                msg.chat.id,
-                format!("📝 Saved as raw log entry (AI unavailable: {})", e),
-            )
-            .await?;
-            if let Some(ref notifier) = sync_notifier {
-                notifier.notify();
+    // Process the text note entry (classify, write to daily note, notify sync)
+    let process_result = process_text_entry(
+        &text,
+        &config,
+        &ai_service,
+        &vault,
+        sync_notifier.as_ref(),
+    )
+    .await;
+
+    match process_result {
+        Ok((classified, ai_success)) => {
+            if !ai_success {
+                // Sent as raw entry since AI failed, but notify user
+                bot.send_message(
+                    msg.chat.id,
+                    "📝 Saved as raw log entry (AI classification unavailable)",
+                )
+                .await?;
+            } else if let Err(error) = send_confirmation(&bot, &msg, &config, &classified).await {
+                error!(error = %error, "Failed to send text confirmation");
             }
-            return Ok(());
         }
-    };
-
-    // Format and write to vault
-    let (section, content) = writer::format_for_daily_note(&classified);
-    let _path = vault.append_to_section(section, &content).await?;
-
-    // Update frontmatter if AI provided any
-    if let Some(ref frontmatter) = classified.frontmatter {
-        if !frontmatter.is_empty() {
-            vault.update_frontmatter(frontmatter).await?;
+        Err(e) => {
+            error!(error = %e, "Failed to process text entry");
+            bot.send_message(msg.chat.id, format!("❌ Failed to save: {}", e))
+                .await?;
         }
-    }
-
-    // Notify git sync
-    if let Some(ref notifier) = sync_notifier {
-        notifier.notify();
-    }
-
-    if let Err(error) = send_confirmation(&bot, &msg, &config, &classified).await {
-        error!(error = %error, "Failed to send text confirmation");
     }
 
     Ok(())
+}
+
+/// Process a text entry: classify → format → write to vault → update frontmatter → notify sync.
+/// Returns the ClassifiedNote and a boolean indicating if AI classification succeeded.
+pub async fn process_text_entry(
+    text: &str,
+    config: &Config,
+    ai_service: &AiService,
+    vault: &DailyNoteManager,
+    sync_notifier: Option<&SyncNotifier>,
+) -> Result<(ClassifiedNote, bool), Box<dyn std::error::Error + Send + Sync>> {
+    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
+    match ai_service
+        .classify_text(text, &config.openrouter_model_classify, guide.as_deref())
+        .await
+    {
+        Ok(c) => {
+            // Format and write to vault
+            let (section, content) = writer::format_for_daily_note(&c);
+            vault.append_to_section(section, &content).await?;
+
+            // Update frontmatter if AI provided any
+            if let Some(ref frontmatter) = c.frontmatter {
+                if !frontmatter.is_empty() {
+                    vault.update_frontmatter(frontmatter).await?;
+                }
+            }
+
+            // Notify git sync
+            if let Some(notifier) = sync_notifier {
+                notifier.notify();
+            }
+
+            Ok((c, true))
+        }
+        Err(e) => {
+            error!(error = %e, "AI classification failed, using raw format");
+            // Fallback: write as raw log entry
+            let (section, content) = writer::format_raw_entry(text);
+            vault.append_to_section(section, &content).await?;
+
+            if let Some(notifier) = sync_notifier {
+                notifier.notify();
+            }
+
+            Ok((
+                ClassifiedNote {
+                    category: NoteCategory::Log,
+                    markdown: format!("- {}", text),
+                    tags: Vec::new(),
+                    summary: text.to_string(),
+                    frontmatter: None,
+                },
+                false,
+            ))
+        }
+    }
 }
 
 fn build_confirmation_message(classified: &ClassifiedNote) -> String {
