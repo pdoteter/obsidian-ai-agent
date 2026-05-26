@@ -1,5 +1,16 @@
 // WebUI Client-side Application
 document.addEventListener("DOMContentLoaded", () => {
+    // Helper to safely execute lucide icon updates (robust against offline CDN load failure)
+    function safeCreateIcons() {
+        if (typeof lucide !== 'undefined' && lucide.createIcons) {
+            try {
+                lucide.createIcons();
+            } catch (e) {
+                console.error("Lucide icon generation failed:", e);
+            }
+        }
+    }
+
     // Select elements
     const authGateway = document.getElementById("auth-gateway");
     const authForm = document.getElementById("auth-form");
@@ -45,7 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let recordDuration = 0;
 
     // Initialize Lucide Icons
-    lucide.createIcons();
+    safeCreateIcons();
 
     // Textarea Auto-grow helper
     messageInput.addEventListener("input", () => {
@@ -96,21 +107,26 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (res.ok) {
                 localStorage.setItem("webui_token", token);
+                authToken = token; // Ensure global state is updated!
                 authGateway.classList.add("hidden");
                 initWebSocket();
                 fetchCurrentNote();
                 appendSystemMessage("🔒 Secure session successfully established.");
+            } else if (res.status === 401) {
+                showAuthError("Invalid Access Token. Please try again.");
             } else {
-                showAuthError();
+                const errText = await res.text();
+                showAuthError(`Server error (${res.status}): ${errText}`);
             }
         } catch (err) {
-            showAuthError();
+            showAuthError(`Failed to authenticate: ${err.message}`);
         } finally {
             setLoading(false);
         }
     }
 
-    function showAuthError() {
+    function showAuthError(message = "Invalid Access Token. Please try again.") {
+        authError.textContent = message;
         authError.classList.remove("hidden");
         passcodeInput.value = "";
         authToken = "";
@@ -196,6 +212,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (res.ok) {
                 const data = await res.json();
                 renderDailyNote(data.date, data.content);
+            } else if (res.status === 401) {
+                console.warn("Unauthorized token detected in fetchCurrentNote, forcing logout.");
+                logoutBtn.click();
             }
         } catch (e) {
             console.error("Failed to fetch daily note:", e);
@@ -452,7 +471,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 attachBtn.classList.remove("hidden");
                 sendBtn.classList.remove("hidden");
                 micIcon.setAttribute("data-lucide", "mic");
-                lucide.createIcons();
+                safeCreateIcons();
 
                 // Build audio Blob
                 const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
@@ -479,7 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
             sendBtn.classList.add("hidden");
             
             micIcon.setAttribute("data-lucide", "square");
-            lucide.createIcons();
+            safeCreateIcons();
 
             recordInterval = setInterval(() => {
                 recordDuration += 1;
