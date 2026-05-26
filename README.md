@@ -82,6 +82,17 @@ The Obsidian AI Agent includes a secure, beautiful, real-time companion WebUI we
    powershell -File ./run-e2e.ps1
    ```
 
+### First-Time Access Guide
+Once the agent is running locally or in Docker:
+1. **Open your browser** and navigate to: `http://localhost:3000` (or your custom configured port).
+2. **Access Passcode**: You will be greeted by a secure, glassmorphic passcode authentication gateway. 
+3. **Unlock**: Enter the value of the `WEBUI_AUTH_TOKEN` that you defined in your `.env` file (e.g., `your_secure_passcode`) and click **Unlock Portal**.
+4. **Seamless Auto-Login**: Alternatively, you can log in instantly and bypass the passcode prompt by appending a `token` query parameter to the URL:
+   ```
+   http://localhost:3000/?token=your_secure_passcode
+   ```
+5. **Persistent Sessions**: Once successfully authenticated, your token is securely persisted in the browser's `localStorage`. You will remain logged in automatically on future visits from the same browser/device without having to re-enter your passcode!
+
 ## Docker
 
 Pre-built images are available on [Docker Hub](https://hub.docker.com/r/peterluxem/obsidian-ai-agent):
