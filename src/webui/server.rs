@@ -41,8 +41,8 @@ pub struct WebuiState {
 
 /// Start the concurrent Axum WebUI/API server
 pub async fn start_server(state: WebuiState, port: u16) {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    info!(port = port, "Starting concurrent WebUI server on http://localhost:{}...", port);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    info!(port = port, "Starting concurrent WebUI server on http://0.0.0.0:{}...", port);
 
     // Spawn background task to listen for Vault writes and trigger WebuiEvent::NoteUpdate broadcasts
     if let Some(mut rx) = state.vault.subscribe_updates() {
