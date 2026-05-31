@@ -16,10 +16,19 @@ git:
 
 # AI model settings (optional — defaults shown)
 ai:
-  provider: openrouter                    # openrouter | gemini (default: openrouter)
+  # AI provider: openrouter | gemini (default: openrouter)
+  # - openrouter: Requires OPENROUTER_API_KEY in .env
+  # - gemini: Requires GEMINI_API_KEY or GEMINI_SERVICE_ACCOUNT_KEY_PATH in .env (Required for PDF transcription)
+  provider: openrouter
+
+  # Transcription settings
   whisper_model: whisper-1                # OpenAI Whisper model for transcription
   whisper_language: nl                    # ISO-639-1 language code (e.g. nl, en, de)
-  classify_model: google/gemini-2.5-flash # AI model for classification (e.g., gemini-1.5-flash, google/gemini-2.5-flash)
+
+  # Classification settings
+  # - If provider is openrouter: use OpenRouter model names (e.g. google/gemini-2.5-flash)
+  # - If provider is gemini: use native Google model names (e.g. gemini-1.5-flash)
+  classify_model: google/gemini-2.5-flash
 
 # Access control (optional — empty list allows all users)
 access:
@@ -68,4 +77,3 @@ log_level: info
 webui:
   enabled: true                            # Enable/disable the secure companion WebUI (default: true)
   port: 3000                               # Local port to host the WebUI server (default: 3000)
-

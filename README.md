@@ -2,6 +2,16 @@
 
 Telegram bot that converts text, voice, and photo messages into structured Obsidian daily notes.
 
+- **Transcribes** voice messages using OpenAI Whisper.
+- **Transcribes and Summarizes** PDF documents using Gemini Multimodal.
+- **Describes and extracts EXIF metadata** from photos.
+- **Classifies** the content using AI (via OpenRouter/Gemini).
+- **Appends** the structured entry to the user's Obsidian Daily Note.
+- **Summarizes URLs** and optionally extracts full YouTube transcripts.
+- **Synchronizes** the vault using Git with automated conflict resolution.
+- **Manages a Financial Portfolio**: Dedicated bot handler for position tracking and Q&A.
+- **WebUI Companion**: Secure companion web portal for direct capture and real-time sync.
+
 ## Requirements
 
 - Rust 1.85+
@@ -26,6 +36,17 @@ Send photos via Telegram to automatically:
 - Append to daily note with Obsidian wiki link
 
 Photos are processed through the same classification pipeline as text/voice messages, including frontmatter extraction and guide support.
+
+## PDF Messages
+
+Send PDF documents via Telegram to automatically:
+- **Transcribe and OCR**: Full text extraction (including tables) via Gemini Multimodal.
+- **AI Summary**: Concise summary of the document's content.
+- **Save to Vault**: Both the original PDF and the generated transcript are saved to your vault.
+- **Log in Daily Note**: Entries are automatically linked and tagged in your daily note.
+
+> [!IMPORTANT]
+> PDF transcription currently requires the native **Google Gemini** provider to be configured. See the [AI Providers](#ai-providers) section for setup details.
 
 ## URL Messages
 
@@ -130,6 +151,36 @@ The workflow at `.github/workflows/docker.yml` builds and pushes to Docker Hub. 
 |--------|-------|
 | `DOCKERHUB_USERNAME` | Your Docker Hub username |
 | `DOCKERHUB_TOKEN` | Docker Hub access token ([create one here](https://hub.docker.com/settings/security)) |
+
+## AI Providers
+
+The Obsidian AI Agent supports multiple AI providers for classification, summarization, and OCR.
+
+### OpenRouter (Default)
+[OpenRouter](https://openrouter.ai/) provides a unified interface to hundreds of models (Gemini, Claude, GPT, etc.). It is the easiest way to get started.
+
+- **Setup**: Set `ai.provider: openrouter` in `config.yaml` and provide `OPENROUTER_API_KEY` in `.env`.
+- **Classification**: Recommended model is `google/gemini-2.0-flash-lite-001` or `google/gemini-2.5-flash`.
+
+### Google Gemini (Native)
+Using the Google Gemini API directly can be faster and cheaper for classification. **Note: Native Gemini is required for PDF transcription.**
+
+- **Setup**: Set `ai.provider: gemini` in `config.yaml`.
+- **Classification**: Recommended model is `gemini-2.0-flash` or `gemini-1.5-flash`.
+
+#### Authentication Methods
+
+You can authenticate with Gemini in two ways:
+
+1. **Standard API Key**:
+   - Get a key from [Google AI Studio](https://aistudio.google.com/).
+   - Add `GEMINI_API_KEY=your_key` to your `.env` file.
+
+2. **Google Cloud Service Account (OAuth 2.0)**:
+   - Create a Service Account in your Google Cloud Project with "Generative Language Client" permissions.
+   - Download the JSON key file.
+   - Add `GEMINI_SERVICE_ACCOUNT_KEY_PATH=/path/to/key.json` to your `.env` file.
+   - *Note: If neither key is provided, the agent will attempt to use Application Default Credentials (ADC).*
 
 ## Configuration
 
