@@ -330,7 +330,11 @@ async fn handle_message(
         .await
     } else if let Some(doc) = msg.document() {
         if doc.mime_type.as_ref().map(|m| m.as_ref()) == Some("application/pdf")
-            || doc.file_name.as_ref().map(|f| f.ends_with(".pdf")).unwrap_or(false)
+            || doc
+                .file_name
+                .as_ref()
+                .map(|f| f.ends_with(".pdf"))
+                .unwrap_or(false)
         {
             handlers::pdf::handle_pdf_message(
                 bot,

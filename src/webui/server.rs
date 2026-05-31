@@ -464,11 +464,11 @@ async fn post_pdf_message(
     if let Err(status) = check_auth(&headers, &state.config) {
         return (status, "Unauthorized").into_response();
     }
-    
+
     let mut pdf_bytes = Vec::new();
     let mut caption = None;
     let mut original_filename = None;
-    
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
@@ -484,11 +484,11 @@ async fn post_pdf_message(
             }
         }
     }
-    
+
     if pdf_bytes.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing PDF file payload").into_response();
     }
-    
+
     let result = crate::handlers::pdf::process_pdf_entry(
         &pdf_bytes,
         original_filename.as_deref(),
@@ -499,9 +499,9 @@ async fn post_pdf_message(
         state.sync_notifier.as_ref(),
     )
     .await;
-    
+
     match result {
-        Ok((pdf_filename, transcript_filename, title, gemini_success)) => {
+        Ok((pdf_filename, transcript_filename, title, _summary, gemini_success)) => {
             broadcast_note_update(&state).await;
             let response = PdfMessageResponse {
                 pdf_filename,
@@ -511,7 +511,11 @@ async fn post_pdf_message(
             };
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process PDF note: {}", e)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to process PDF note: {}", e),
+        )
+            .into_response(),
     }
 }
 
