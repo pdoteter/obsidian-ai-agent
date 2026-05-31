@@ -1,7 +1,7 @@
 use axum::{
     extract::{
         ws::{Message as WsMessage, WebSocket},
-        Multipart, Query, State, WebSocketUpgrade,
+        DefaultBodyLimit, Multipart, Query, State, WebSocketUpgrade,
     },
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
@@ -76,6 +76,7 @@ pub async fn start_server(state: WebuiState, port: u16) {
         .route("/api/pdf", post(post_pdf_message))
         // Real-time updates WebSocket
         .route("/ws", get(ws_handler))
+        .layer(DefaultBodyLimit::max(250 * 1024 * 1024))
         .with_state(state);
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
