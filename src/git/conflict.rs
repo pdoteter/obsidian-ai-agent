@@ -21,6 +21,7 @@ fn escape_html(s: &str) -> String {
 }
 
 /// Manages conflict resolution via Telegram inline keyboard
+#[derive(Clone)]
 #[allow(dead_code)]
 pub struct ConflictResolver {
     pub bot: Bot,

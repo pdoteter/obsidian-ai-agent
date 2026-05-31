@@ -312,6 +312,27 @@ impl GitSync {
         Ok(())
     }
 
+    /// Force reset local branch to match remote branch exactly, discarding all local changes
+    pub async fn force_refresh(&self) -> Result<(), GitError> {
+        info!("Performing force refresh: discarding local changes and resetting to remote");
+
+        // Abort any active rebase just in case
+        let _ = self.run_git(&["rebase", "--abort"]).await;
+
+        // Fetch remote changes first to ensure we have the absolute latest
+        self.fetch().await?;
+
+        // Reset hard to remote ref
+        let remote_ref = format!("{}/{}", self.remote_name, self.branch);
+        self.run_git(&["reset", "--hard", &remote_ref]).await?;
+
+        // Clean untracked files
+        self.run_git(&["clean", "-fd"]).await?;
+
+        info!("Force refresh completed successfully");
+        Ok(())
+    }
+
     /// Verify repository is in a clean state with no leftover rebase
     async fn verify_clean_state(&self) -> Result<(), GitError> {
         // Check if rebase is still in progress

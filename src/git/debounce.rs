@@ -14,14 +14,25 @@ use crate::config::Config;
 use crate::error::GitError;
 
 /// A handle to notify the debounced git sync that changes occurred
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SyncNotifier {
     tx: mpsc::UnboundedSender<()>,
-    git_sync: Arc<GitSync>,
+    pub(crate) git_sync: Arc<GitSync>,
     debounce_pending: Arc<AtomicBool>,
-    sync_running: Arc<AtomicBool>,
+    pub(crate) sync_running: Arc<AtomicBool>,
     resolving: Arc<AtomicBool>,
-    git_lock: Arc<Mutex<()>>,
+    pub(crate) git_lock: Arc<Mutex<()>>,
+    conflict_resolver: ConflictResolver,
+    ai_service: Arc<AiService>,
+    config: Arc<Config>,
+}
+
+impl std::fmt::Debug for SyncNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncNotifier")
+            .field("git_sync", &self.git_sync)
+            .finish_non_exhaustive()
+    }
 }
 
 impl SyncNotifier {
@@ -34,6 +45,180 @@ impl SyncNotifier {
         self.debounce_pending.load(Ordering::SeqCst)
             || self.sync_running.load(Ordering::SeqCst)
             || self.resolving.load(Ordering::SeqCst)
+    }
+
+    pub fn set_resolving(&self, val: bool) {
+        self.resolving.store(val, Ordering::SeqCst);
+    }
+
+    pub async fn force_refresh(&self) -> Result<(), GitError> {
+        let Ok(_git_guard) = self.git_lock.try_lock() else {
+            return Err(GitError::CommandFailed {
+                command: "force_refresh".to_string(),
+                message: "Git lock is currently held by another operation".to_string(),
+            });
+        };
+
+        if self.resolving.load(Ordering::SeqCst) {
+            return Err(GitError::CommandFailed {
+                command: "force_refresh".to_string(),
+                message: "Conflict resolution is currently in progress".to_string(),
+            });
+        }
+
+        let git = self.git_sync.clone();
+        let sync_running = self.sync_running.clone();
+        sync_running.store(true, Ordering::SeqCst);
+        let result = git.force_refresh().await;
+        sync_running.store(false, Ordering::SeqCst);
+
+        result
+    }
+
+    pub async fn manual_sync(&self, chat_id: teloxide::types::ChatId) -> Result<SyncResult, GitError> {
+        let Ok(_git_guard) = self.git_lock.try_lock() else {
+            return Err(GitError::CommandFailed {
+                command: "manual_sync".to_string(),
+                message: "Git lock is currently held by another operation".to_string(),
+            });
+        };
+
+        if self.resolving.load(Ordering::SeqCst) {
+            return Err(GitError::CommandFailed {
+                command: "manual_sync".to_string(),
+                message: "Conflict resolution is currently in progress".to_string(),
+            });
+        }
+
+        let git = self.git_sync.clone();
+        let sync_running = self.sync_running.clone();
+        sync_running.store(true, Ordering::SeqCst);
+        let result = git.full_sync().await;
+        sync_running.store(false, Ordering::SeqCst);
+
+        match &result {
+            Ok(SyncResult::ConflictDetected(info)) => {
+                // Set resolving flag
+                self.resolving.store(true, Ordering::SeqCst);
+
+                // Call AI analysis with timeout
+                let ai_analysis = {
+                    let ai_service = self.ai_service.clone();
+                    let config = self.config.clone();
+                    let info_clone = info.clone();
+
+                    match tokio::time::timeout(
+                        Duration::from_secs(25),
+                        analyze_conflicts(
+                            &ai_service,
+                            &config.openrouter_model_classify,
+                            &info_clone,
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(Ok(analysis)) => Some(analysis),
+                        _ => None,
+                    }
+                };
+
+                // Prepare diff preview (truncate to 2500 chars)
+                let diff_preview = if info.diff_output.len() > 2500 {
+                    format!(
+                        "{}... (truncated)",
+                        crate::utils::safe_truncate(&info.diff_output, 2500)
+                    )
+                } else {
+                    info.diff_output.clone()
+                };
+
+                // Ask user for resolution
+                let resolution_result = self.conflict_resolver
+                    .ask_resolution(
+                        chat_id,
+                        &info.files,
+                        ai_analysis,
+                        &diff_preview,
+                    )
+                    .await;
+
+                match resolution_result {
+                    Ok(resolution) => {
+                        info!(resolution = ?resolution, "User chose conflict resolution");
+
+                        // Execute resolution in blocking task
+                        let git = self.git_sync.clone();
+                        let resolution_clone = resolution.clone();
+                        let exec_result = match resolution_clone {
+                            super::conflict::ConflictResolution::Ours => {
+                                git.resolve_ours().await
+                            }
+                            super::conflict::ConflictResolution::Theirs => {
+                                git.resolve_theirs().await
+                            }
+                            super::conflict::ConflictResolution::Abort => {
+                                git.resolve_abort().await
+                            }
+                        };
+
+                        match exec_result {
+                            Ok(()) => {
+                                info!("Conflict resolution executed successfully");
+
+                                // Retry sync if resolution was Ours or Theirs
+                                if resolution != super::conflict::ConflictResolution::Abort {
+                                    info!("Retrying sync after conflict resolution");
+                                    let retry_result = git.full_sync().await;
+
+                                    match retry_result {
+                                        Ok(retry_sync_result) => {
+                                            info!(result = %retry_sync_result, "Retry sync completed");
+                                            // Notify user of final success
+                                            let _ = self.conflict_resolver.bot.send_message(
+                                                chat_id,
+                                                format!("✅ Conflict resolved successfully. Git sync result: {}", retry_sync_result)
+                                            ).await;
+                                        }
+                                        Err(e) => {
+                                            error!(error = %e, "Retry sync failed after conflict resolution");
+                                            let _ = self.conflict_resolver.bot.send_message(
+                                                chat_id,
+                                                format!("❌ Git sync failed after resolving conflict: {}", e)
+                                            ).await;
+                                        }
+                                    }
+                                } else {
+                                    let _ = self.conflict_resolver.bot.send_message(
+                                        chat_id,
+                                        "❌ Git sync aborted by user."
+                                    ).await;
+                                }
+                            }
+                            Err(e) => {
+                                error!(error = %e, "Failed to execute conflict resolution");
+                                let _ = self.conflict_resolver.bot.send_message(
+                                    chat_id,
+                                    format!("❌ Failed to execute conflict resolution: {}", e)
+                                ).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "Failed to get conflict resolution from user");
+                        let _ = self.conflict_resolver.bot.send_message(
+                            chat_id,
+                            format!("❌ Failed to get conflict resolution: {}", e)
+                        ).await;
+                    }
+                }
+
+                // Clear resolving flag
+                self.resolving.store(false, Ordering::SeqCst);
+            }
+            _ => {}
+        }
+
+        result
     }
 
     pub async fn pull_if_idle(&self) -> Result<Option<super::sync::PreWriteSyncResult>, GitError> {
@@ -89,6 +274,9 @@ pub fn spawn_debounced_sync(
         sync_running: sync_running.clone(),
         resolving: resolving.clone(),
         git_lock: git_lock.clone(),
+        conflict_resolver: conflict_resolver.clone(),
+        ai_service: ai_service.clone(),
+        config: config.clone(),
     };
 
     tokio::spawn(async move {
