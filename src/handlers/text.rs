@@ -37,6 +37,116 @@ pub async fn handle_text_message(
         }
     }
 
+    // Intercept Git commands
+    if text == "/git_refresh" {
+        if let Some(ref notifier) = sync_notifier {
+            if notifier.is_busy() {
+                bot.send_message(
+                    msg.chat.id,
+                    "⏳ Git operation is already in progress. Please try again in a moment.",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let bot_clone = bot.clone();
+            let chat_id = msg.chat.id;
+            let notifier_clone = notifier.clone();
+
+            bot.send_message(chat_id, "🔄 Starting manual Git synchronization...")
+                .await?;
+
+            tokio::spawn(async move {
+                match notifier_clone.manual_sync(chat_id).await {
+                    Ok(crate::git::sync::SyncResult::NothingToSync) => {
+                        let _ = bot_clone
+                            .send_message(chat_id, "✅ Git sync completed: Nothing to sync.")
+                            .await;
+                    }
+                    Ok(crate::git::sync::SyncResult::Pushed) => {
+                        let _ = bot_clone
+                            .send_message(chat_id, "✅ Git sync completed: Local changes pushed to remote.")
+                            .await;
+                    }
+                    Ok(crate::git::sync::SyncResult::PushedWithoutFetch) => {
+                        let _ = bot_clone
+                            .send_message(chat_id, "✅ Git sync completed: Pushed without fetch (remote offline).")
+                            .await;
+                    }
+                    Ok(crate::git::sync::SyncResult::RebasedAndPushed) => {
+                        let _ = bot_clone
+                            .send_message(
+                                chat_id,
+                                "✅ Git sync completed: Rebased local changes on top of remote and pushed successfully.",
+                            )
+                            .await;
+                    }
+                    Ok(crate::git::sync::SyncResult::ConflictDetected(_)) => {
+                        // Conflict resolution was already handled interactively inside manual_sync
+                    }
+                    Err(e) => {
+                        let _ = bot_clone
+                            .send_message(chat_id, format!("❌ Git sync failed: {}", e))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ Git synchronization is disabled in configuration.",
+            )
+            .await?;
+        }
+        return Ok(());
+    } else if text == "/git_force_refresh" {
+        if let Some(ref notifier) = sync_notifier {
+            if notifier.is_busy() {
+                bot.send_message(
+                    msg.chat.id,
+                    "⏳ Git operation is already in progress. Please try again in a moment.",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let bot_clone = bot.clone();
+            let chat_id = msg.chat.id;
+            let notifier_clone = notifier.clone();
+
+            bot.send_message(
+                chat_id,
+                "🔄 Performing force refresh: fetching and hard resetting local vault to the remote branch, discarding all local changes...",
+            )
+            .await?;
+
+            tokio::spawn(async move {
+                match notifier_clone.force_refresh().await {
+                    Ok(()) => {
+                        let _ = bot_clone
+                            .send_message(
+                                chat_id,
+                                "✅ Force refresh completed successfully. The agent vault is now aligned with the latest remote version!",
+                            )
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = bot_clone
+                            .send_message(chat_id, format!("❌ Force refresh failed: {}", e))
+                            .await;
+                    }
+                }
+            });
+        } else {
+            bot.send_message(
+                msg.chat.id,
+                "⚠️ Git synchronization is disabled in configuration.",
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+
     // Check for URLs and delegate to URL handler if present
     let detected_urls = crate::url::detect::detect_urls(&text);
     if !detected_urls.is_empty() {

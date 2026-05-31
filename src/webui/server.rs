@@ -289,6 +289,146 @@ async fn post_text_message(
         return (status, "Unauthorized").into_response();
     }
 
+    let text = payload.text.trim();
+    if text == "/git_refresh" {
+        if let Some(ref notifier) = state.sync_notifier {
+            if notifier.is_busy() {
+                let response = TextMessageResponse {
+                    category: "command".to_string(),
+                    summary: "⏳ Git operation is already in progress. Please try again in a moment.".to_string(),
+                    tags: Vec::new(),
+                    ai_success: true,
+                };
+                return (StatusCode::OK, Json(response)).into_response();
+            }
+
+            let Ok(_git_guard) = notifier.git_lock.try_lock() else {
+                let response = TextMessageResponse {
+                    category: "command".to_string(),
+                    summary: "⏳ Git lock is currently held by another operation. Please try again.".to_string(),
+                    tags: Vec::new(),
+                    ai_success: true,
+                };
+                return (StatusCode::OK, Json(response)).into_response();
+            };
+
+            let sync_running = notifier.sync_running.clone();
+            sync_running.store(true, std::sync::atomic::Ordering::SeqCst);
+            let result = notifier.git_sync.full_sync().await;
+            sync_running.store(false, std::sync::atomic::Ordering::SeqCst);
+
+            match result {
+                Ok(crate::git::sync::SyncResult::NothingToSync) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: "✅ Git sync completed: Nothing to sync.".to_string(),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Ok(crate::git::sync::SyncResult::Pushed) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: "✅ Git sync completed: Local changes pushed to remote.".to_string(),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Ok(crate::git::sync::SyncResult::PushedWithoutFetch) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: "✅ Git sync completed: Pushed without fetch (remote offline).".to_string(),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Ok(crate::git::sync::SyncResult::RebasedAndPushed) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: "✅ Git sync completed: Rebased local changes on top of remote and pushed successfully.".to_string(),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Ok(crate::git::sync::SyncResult::ConflictDetected(info)) => {
+                    let files_list = info.files.join(", ");
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: format!("⚠️ Git sync failed: Conflict detected in file(s): **{}**. Please resolve using Telegram or force refresh using `/git_force_refresh`.", files_list),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Err(e) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: format!("❌ Git sync failed: {}", e),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+            }
+        } else {
+            let response = TextMessageResponse {
+                category: "command".to_string(),
+                summary: "⚠️ Git synchronization is disabled in configuration.".to_string(),
+                tags: Vec::new(),
+                ai_success: true,
+            };
+            return (StatusCode::OK, Json(response)).into_response();
+        }
+    } else if text == "/git_force_refresh" {
+        if let Some(ref notifier) = state.sync_notifier {
+            if notifier.is_busy() {
+                let response = TextMessageResponse {
+                    category: "command".to_string(),
+                    summary: "⏳ Git operation is already in progress. Please try again in a moment.".to_string(),
+                    tags: Vec::new(),
+                    ai_success: true,
+                };
+                return (StatusCode::OK, Json(response)).into_response();
+            }
+
+            match notifier.force_refresh().await {
+                Ok(()) => {
+                    // Push updated daily note to all WebSockets because force refresh might have overwritten today's note!
+                    broadcast_note_update(&state).await;
+
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: "✅ Force refresh completed successfully. The agent vault is now aligned with the latest remote version!".to_string(),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+                Err(e) => {
+                    let response = TextMessageResponse {
+                        category: "command".to_string(),
+                        summary: format!("❌ Force refresh failed: {}", e),
+                        tags: Vec::new(),
+                        ai_success: true,
+                    };
+                    return (StatusCode::OK, Json(response)).into_response();
+                }
+            }
+        } else {
+            let response = TextMessageResponse {
+                category: "command".to_string(),
+                summary: "⚠️ Git synchronization is disabled in configuration.".to_string(),
+                tags: Vec::new(),
+                ai_success: true,
+            };
+            return (StatusCode::OK, Json(response)).into_response();
+        }
+    }
+
     // Process text message through extracted text handler
     let result = crate::handlers::text::process_text_entry(
         &payload.text,

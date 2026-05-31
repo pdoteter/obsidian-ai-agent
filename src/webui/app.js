@@ -389,11 +389,13 @@ document.addEventListener("DOMContentLoaded", () => {
                         responseMsg = `✅ **Task Created** under **Todo** category!\n*Summary*: "${data.summary}"\n*Tags*: ${data.tags.map(t => `#${t}`).join(" ") || "None"}`;
                     } else if (data.category === "note") {
                         responseMsg = `📝 **Note Captured** and categorized successfully.\n*Summary*: "${data.summary}"\n*Tags*: ${data.tags.map(t => `#${t}`).join(" ") || "None"}`;
+                    } else if (data.category === "command") {
+                        responseMsg = data.summary;
                     } else {
                         responseMsg = `👍 **Log Appended** as raw entry to your daily notes list.\n*Summary*: "${data.summary}"`;
                     }
                     
-                    if (!data.ai_success) {
+                    if (data.category !== "command" && !data.ai_success) {
                         responseMsg = `📝 **Appended Raw Entry** (AI classification failed or returned raw fallback).\n*Entry*: "${data.summary}"`;
                     }
 
