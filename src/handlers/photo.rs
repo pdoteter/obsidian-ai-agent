@@ -196,12 +196,7 @@ pub async fn process_photo_entry(
             Some(&c.markdown),
             None,
         ),
-        Err(_) => format_photo_content(
-            &config.image.assets_folder,
-            &filename,
-            None,
-            caption,
-        ),
+        Err(_) => format_photo_content(&config.image.assets_folder, &filename, None, caption),
     };
 
     vault
