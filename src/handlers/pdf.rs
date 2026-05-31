@@ -1,12 +1,12 @@
-use std::sync::Arc;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use teloxide::net::Download;
 use teloxide::prelude::*;
 use teloxide::types::ChatAction;
-use teloxide::net::Download;
 use tracing::{error, info};
 
-use crate::ai::AiService;
 use crate::ai::classify::ClassifiedNote;
+use crate::ai::AiService;
 use crate::config::Config;
 use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
@@ -26,7 +26,10 @@ pub async fn handle_pdf_message(
     // 1. Auth check
     if let Some(user) = msg.from.as_ref() {
         if !config.is_user_allowed(user.id.0) {
-            info!(user_id = user.id.0, "Unauthorized user, ignoring PDF document");
+            info!(
+                user_id = user.id.0,
+                "Unauthorized user, ignoring PDF document"
+            );
             return Ok(());
         }
     }
@@ -36,7 +39,10 @@ pub async fn handle_pdf_message(
 
     // 2. Extract document payload
     let doc = msg.document().ok_or("No document in message")?;
-    let original_name = doc.file_name.clone().unwrap_or_else(|| "document.pdf".to_string());
+    let original_name = doc
+        .file_name
+        .clone()
+        .unwrap_or_else(|| "document.pdf".to_string());
 
     info!(
         filename = %original_name,
@@ -63,7 +69,7 @@ pub async fn handle_pdf_message(
 
     // 4. Process the entry
     let caption = msg.caption().map(|s| s.to_string());
-    
+
     bot.send_chat_action(msg.chat.id, ChatAction::Typing)
         .await?;
 
@@ -79,7 +85,7 @@ pub async fn handle_pdf_message(
     .await;
 
     match process_result {
-        Ok((pdf_filename, transcript_filename, title, gemini_success)) => {
+        Ok((pdf_filename, transcript_filename, title, _summary, gemini_success)) => {
             if gemini_success {
                 bot.send_message(
                     msg.chat.id,
@@ -102,8 +108,11 @@ pub async fn handle_pdf_message(
         }
         Err(e) => {
             error!(error = %e, "Failed to process PDF entry");
-            bot.send_message(msg.chat.id, format!("❌ Failed to save and process PDF: {}", e))
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("❌ Failed to save and process PDF: {}", e),
+            )
+            .await?;
         }
     }
 
@@ -111,7 +120,7 @@ pub async fn handle_pdf_message(
 }
 
 /// Process a PDF entry: save original PDF → call Gemini Multimodal OCR → save transcript md → write log to vault daily note.
-/// Returns (pdf_filename, transcript_filename, document_title, gemini_success)
+/// Returns (pdf_filename, transcript_filename, document_title, summary, gemini_success)
 pub async fn process_pdf_entry(
     bytes: &[u8],
     original_filename: Option<&str>,
@@ -120,15 +129,15 @@ pub async fn process_pdf_entry(
     ai_service: &AiService,
     vault: &DailyNoteManager,
     sync_notifier: Option<&SyncNotifier>,
-) -> Result<(String, String, String, bool), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(String, String, String, String, bool), Box<dyn std::error::Error + Send + Sync>> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    
+
     // Ensure daily note exists and resolve its parent directory
     let note_path = vault.ensure_today().await.map_err(|e| {
         error!(error = %e, "Failed to ensure today's daily note before saving PDF");
         e
     })?;
-    
+
     let note_dir = note_path
         .parent()
         .ok_or("Daily note has no parent directory")?;
@@ -139,7 +148,10 @@ pub async fn process_pdf_entry(
     let mut gemini_success = false;
 
     // We can infer if Gemini is being used or try/catch UnsupportedCapability
-    match ai_service.transcribe_pdf(bytes, user_prompt, gemini_model).await {
+    match ai_service
+        .transcribe_pdf(bytes, user_prompt, gemini_model)
+        .await
+    {
         Ok(note) => {
             classified_res = Some(note);
             gemini_success = true;
@@ -149,36 +161,71 @@ pub async fn process_pdf_entry(
         }
     }
 
-    // Determine filenames and titles
-    let (pdf_filename, transcript_filename, title, content_markdown) = if gemini_success {
+    // Determine filenames, titles and summary
+    let (pdf_filename, transcript_filename, title, summary, content_markdown) = if gemini_success {
         let note = classified_res.as_ref().unwrap();
-        let slug = crate::ai::classify::slug_from_summary(&note.summary);
-        
-        let pdf_name = generate_filename(&today, &slug, "pdf");
-        let trans_name = generate_filename(&today, &slug, "md");
-        
-        (pdf_name, trans_name, note.summary.clone(), note.markdown.clone())
+
+        // Clean original filename to derive the slug
+        let orig_clean = original_filename
+            .unwrap_or("document")
+            .trim_end_matches(".pdf");
+        let slug = crate::image::process::sanitize_slug(orig_clean);
+        let slug_final = if slug.is_empty() {
+            crate::ai::classify::slug_from_summary(&note.summary)
+        } else {
+            slug
+        };
+
+        let pdf_name = generate_filename(&today, &slug_final, "pdf");
+        let trans_name = generate_filename(&today, &slug_final, "md");
+
+        (
+            pdf_name,
+            trans_name,
+            original_filename.unwrap_or("PDF Document").to_string(),
+            note.summary.clone(),
+            note.markdown.clone(),
+        )
     } else {
         // Fallback filenames
         let orig_clean = original_filename
             .unwrap_or("document")
             .trim_end_matches(".pdf");
         let slug = crate::image::process::sanitize_slug(orig_clean);
-        let slug_final = if slug.is_empty() { "document".to_string() } else { slug };
-        
+        let slug_final = if slug.is_empty() {
+            "document".to_string()
+        } else {
+            slug
+        };
+
         let pdf_name = generate_filename(&today, &slug_final, "pdf");
-        (pdf_name, String::new(), original_filename.unwrap_or("PDF Document").to_string(), String::new())
+        (
+            pdf_name,
+            String::new(),
+            original_filename.unwrap_or("PDF Document").to_string(),
+            String::new(),
+            String::new(),
+        )
     };
 
     // 1. Save original PDF bytes
-    save_file_asset(bytes, note_dir, &config.image.assets_folder, &pdf_filename).await.map_err(|e| {
-        error!(error = %e, "Failed to save PDF to assets folder");
-        e
-    })?;
+    save_file_asset(bytes, note_dir, &config.image.assets_folder, &pdf_filename)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to save PDF to assets folder");
+            e
+        })?;
 
     // 2. Save transcript md (if Gemini succeeded)
     if gemini_success {
-        save_file_asset(content_markdown.as_bytes(), note_dir, &config.image.assets_folder, &transcript_filename).await.map_err(|e| {
+        save_file_asset(
+            content_markdown.as_bytes(),
+            note_dir,
+            &config.image.assets_folder,
+            &transcript_filename,
+        )
+        .await
+        .map_err(|e| {
             error!(error = %e, "Failed to save transcript to assets folder");
             e
         })?;
@@ -203,7 +250,7 @@ pub async fn process_pdf_entry(
             pdf_filename,
             config.image.assets_folder,
             transcript_filename,
-            content_markdown.replace("\n", "\n    "),
+            summary.replace("\n", "\n    "),
             tags_str
         )
     } else {
@@ -242,7 +289,13 @@ pub async fn process_pdf_entry(
         notifier.notify();
     }
 
-    Ok((pdf_filename, transcript_filename, title, gemini_success))
+    Ok((
+        pdf_filename,
+        transcript_filename,
+        title,
+        summary,
+        gemini_success,
+    ))
 }
 
 /// Helper to generate unique date-slug filenames
@@ -277,11 +330,11 @@ mod tests {
         let date = "2026-05-31";
         let slug = "invoice-receipt";
         let name = generate_filename(date, slug, "pdf");
-        
+
         assert!(name.starts_with("2026-05-31-"));
         assert!(name.contains("invoice-receipt"));
         assert!(name.ends_with(".pdf"));
-        
+
         let suffix = name
             .trim_start_matches("2026-05-31-invoice-receipt-")
             .trim_end_matches(".pdf");

@@ -578,7 +578,11 @@ impl AiProvider for GeminiClient {
         user_prompt: Option<&str>,
         model: &str,
     ) -> Result<ClassifiedNote, AiError> {
-        info!(model = model, bytes_len = pdf_bytes.len(), "Transcribing PDF via Gemini Multimodal");
+        info!(
+            model = model,
+            bytes_len = pdf_bytes.len(),
+            "Transcribing PDF via Gemini Multimodal"
+        );
 
         use base64::engine::general_purpose::STANDARD;
         use base64::Engine;
@@ -598,7 +602,10 @@ You are receiving a PDF document. Your tasks are:
 }";
 
         let text_content = if let Some(p) = user_prompt {
-            format!("Transcribe the attached PDF document. User instruction/context: {}", p)
+            format!(
+                "Transcribe the attached PDF document. User instruction/context: {}",
+                p
+            )
         } else {
             "Transcribe the attached PDF document.".to_string()
         };
@@ -686,10 +693,12 @@ mod tests {
         });
 
         let output = convert_to_gemini_schema(input_schema);
-        
+
         assert_eq!(output["properties"]["frontmatter"]["type"], json!("object"));
         assert!(output.get("additionalProperties").is_none());
-        assert!(output["properties"]["frontmatter"].get("additionalProperties").is_none());
+        assert!(output["properties"]["frontmatter"]
+            .get("additionalProperties")
+            .is_none());
     }
 
     #[test]
@@ -714,6 +723,9 @@ mod tests {
         let schema = extract_gemini_schema(&response_format).expect("should extract");
         assert_eq!(schema["type"], json!("object"));
         assert_eq!(schema["properties"]["tags"]["type"], json!("array"));
-        assert_eq!(schema["properties"]["tags"]["items"]["type"], json!("string"));
+        assert_eq!(
+            schema["properties"]["tags"]["items"]["type"],
+            json!("string")
+        );
     }
 }
