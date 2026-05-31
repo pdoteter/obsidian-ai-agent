@@ -330,6 +330,27 @@ document.addEventListener("DOMContentLoaded", () => {
                     } else {
                         throw new Error(await res.text() || "Failed to upload image");
                     }
+                } else if (fileType === "application/pdf" || activeFile.name.endsWith(".pdf")) {
+                    appendUserMessage(`📄 Sent PDF: ${activeFile.name}`);
+                    clearPreview();
+
+                    const res = await fetch("/api/pdf", {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${authToken}` },
+                        body: formData
+                    });
+                    
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.gemini_success) {
+                            appendBotMessage(`📄 **PDF Document Logged Successfully!**\n\n**Title**: ${data.title}\n*PDF File*: \`${data.pdf_filename}\`\n*Transcript File*: \`${data.transcript_filename}\`\n\nAppended to Daily Note logs.`);
+                        } else {
+                            appendBotMessage(`⚠️ **PDF Saved (Transcription Skipped)**\n\n*Original PDF File*: \`${data.pdf_filename}\`\n\n*Note*: Gemini client is not configured or transcription failed. Only the original document reference has been logged.`);
+                        }
+                        fetchCurrentNote();
+                    } else {
+                        throw new Error(await res.text() || "Failed to upload PDF");
+                    }
                 } else if (fileType.startsWith("audio/") || activeFile.name.endsWith(".wav") || activeFile.name.endsWith(".mp3") || activeFile.name.endsWith(".m4a") || activeFile.name.endsWith(".ogg") || activeFile.name.endsWith(".webm")) {
                     appendUserMessage("🎙️ Sent a voice note");
                     clearPreview();
@@ -408,6 +429,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 messageInput.focus();
             };
             reader.readAsDataURL(file);
+        } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+            // PDF preview state
+            imagePreview.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23ef4444' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z'></path><polyline points='14 2 14 8 20 8'></polyline><path d='M8 13h8'></path><path d='M8 17h8'></path><path d='M10 9H8'></path></svg>";
+            mediaPreviewContainer.classList.remove("hidden");
+            messageInput.focus();
         } else {
             // Audio preview state
             imagePreview.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%238b5cf6' stroke-width='2'><path d='M9 18V5l12-2v13'></path><circle cx='6' cy='18' r='3'></circle><circle cx='18' cy='16' r='3'></circle></svg>";

@@ -264,4 +264,15 @@ impl AiProvider for OpenRouterClient {
         let response = self.chat_completion(&body).await?;
         Self::extract_content(&response)
     }
+
+    async fn transcribe_pdf(
+        &self,
+        _pdf_bytes: &[u8],
+        _user_prompt: Option<&str>,
+        _model: &str,
+    ) -> Result<ClassifiedNote, AiError> {
+        Err(AiError::UnsupportedCapability(
+            "PDF transcription not supported by OpenRouter provider".to_string(),
+        ))
+    }
 }

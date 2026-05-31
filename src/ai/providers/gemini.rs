@@ -479,6 +479,66 @@ impl AiProvider for GeminiClient {
         let response = self.generate_content(model, &body).await?;
         Self::extract_content(&response)
     }
+
+    async fn transcribe_pdf(
+        &self,
+        pdf_bytes: &[u8],
+        user_prompt: Option<&str>,
+        model: &str,
+    ) -> Result<ClassifiedNote, AiError> {
+        info!(model = model, bytes_len = pdf_bytes.len(), "Transcribing PDF via Gemini Multimodal");
+
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let base64_data = STANDARD.encode(pdf_bytes);
+
+        let system_prompt = "You are a highly precise document transcription and classification assistant. \
+You are receiving a PDF document. Your tasks are:
+1. **Transcribe** the entire document's text as accurately as possible. If there are tables, preserve their structure in markdown tables. If there are images, describe them inline.
+2. **Summarize** the document in a concise, human-readable summary of 1-3 sentences.
+3. **Classify** and tag the content.
+4. **Output your result in JSON format ONLY**, matching this schema exactly:
+{
+  \"category\": \"note\",
+  \"summary\": \"Concise 1-3 sentence summary of the document\",
+  \"markdown\": \"The full and detailed transcription of the document in markdown format\",
+  \"tags\": [\"tag1\", \"tag2\"]
+}";
+
+        let text_content = if let Some(p) = user_prompt {
+            format!("Transcribe the attached PDF document. User instruction/context: {}", p)
+        } else {
+            "Transcribe the attached PDF document.".to_string()
+        };
+
+        let body = json!({
+            "system_instruction": {
+                "parts": [{ "text": system_prompt }]
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "application/pdf",
+                            "data": base64_data
+                        }
+                    },
+                    {
+                        "text": text_content
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "response_mime_type": "application/json"
+            }
+        });
+
+        let response = self.generate_content(model, &body).await?;
+        let content = Self::extract_content(&response)?;
+
+        crate::ai::classify::parse_classification_with_fallback(&content)
+    }
 }
 
 #[cfg(test)]

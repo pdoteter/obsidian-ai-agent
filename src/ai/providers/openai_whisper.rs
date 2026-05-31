@@ -164,4 +164,15 @@ impl AiProvider for WhisperClient {
             "Whisper provider does not support chat completion".to_string(),
         ))
     }
+
+    async fn transcribe_pdf(
+        &self,
+        _pdf_bytes: &[u8],
+        _user_prompt: Option<&str>,
+        _model: &str,
+    ) -> Result<ClassifiedNote, AiError> {
+        Err(AiError::UnsupportedCapability(
+            "PDF transcription not supported by Whisper provider".to_string(),
+        ))
+    }
 }
