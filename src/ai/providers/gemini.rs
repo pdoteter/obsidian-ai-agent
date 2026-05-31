@@ -264,6 +264,48 @@ fn parse_data_uri(data_uri: &str) -> (String, String) {
     ("image/jpeg".to_string(), data_uri.to_string())
 }
 
+/// Convert a standard OpenAPI/JSON Schema to one compatible with Gemini REST API.
+/// In particular, Gemini response schema does not support union types like `["object", "null"]`.
+/// We map any type array to the first non-null type in the list.
+fn convert_to_gemini_schema(mut schema: Value) -> Value {
+    if let Some(obj) = schema.as_object_mut() {
+        // Gemini REST API does not support additionalProperties in responseSchema
+        obj.remove("additionalProperties");
+
+        if let Some(t) = obj.get_mut("type") {
+            if let Some(arr) = t.as_array() {
+                let non_null_type = arr
+                    .iter()
+                    .find(|v| v.as_str() != Some("null"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("string"));
+                *t = non_null_type;
+            }
+        }
+
+        if let Some(properties) = obj.get_mut("properties") {
+            if let Some(prop_obj) = properties.as_object_mut() {
+                for (_, prop_val) in prop_obj.iter_mut() {
+                    *prop_val = convert_to_gemini_schema(prop_val.clone());
+                }
+            }
+        }
+
+        if let Some(items) = obj.get_mut("items") {
+            *items = convert_to_gemini_schema(items.clone());
+        }
+    }
+    schema
+}
+
+/// Extract Gemini schema from OpenAI format response format JSON
+fn extract_gemini_schema(response_format: &Value) -> Option<Value> {
+    let raw_schema = response_format
+        .get("json_schema")
+        .and_then(|js| js.get("schema"))?;
+    Some(convert_to_gemini_schema(raw_schema.clone()))
+}
+
 #[async_trait]
 impl AiProvider for GeminiClient {
     async fn classify_text(
@@ -283,6 +325,16 @@ impl AiProvider for GeminiClient {
             guide,
         );
 
+        let response_format = crate::ai::classify::classified_note_response_format();
+        let gemini_schema = extract_gemini_schema(&response_format);
+
+        let mut generation_config = json!({
+            "response_mime_type": "application/json"
+        });
+        if let Some(schema) = gemini_schema {
+            generation_config["responseSchema"] = schema;
+        }
+
         let body = json!({
             "system_instruction": {
                 "parts": [{ "text": system_prompt }]
@@ -291,9 +343,7 @@ impl AiProvider for GeminiClient {
                 "role": "user",
                 "parts": [{ "text": text }]
             }],
-            "generationConfig": {
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": generation_config
         });
 
         let response = self.generate_content(model, &body).await?;
@@ -332,6 +382,16 @@ impl AiProvider for GeminiClient {
 
         let (mime_type, raw_data) = parse_data_uri(image_base64);
 
+        let response_format = crate::ai::classify::classified_note_response_format();
+        let gemini_schema = extract_gemini_schema(&response_format);
+
+        let mut generation_config = json!({
+            "response_mime_type": "application/json"
+        });
+        if let Some(schema) = gemini_schema {
+            generation_config["responseSchema"] = schema;
+        }
+
         let body = json!({
             "system_instruction": {
                 "parts": [{ "text": system_prompt }]
@@ -350,9 +410,7 @@ impl AiProvider for GeminiClient {
                     }
                 ]
             }],
-            "generationConfig": {
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": generation_config
         });
 
         let response = self.generate_content(model, &body).await?;
@@ -390,6 +448,16 @@ impl AiProvider for GeminiClient {
             text_content.push_str(&format!("\n\nUser instructions:\n{}", user_prompt));
         }
 
+        let response_format = crate::ai::summarize::url_summary_response_format();
+        let gemini_schema = extract_gemini_schema(&response_format);
+
+        let mut generation_config = json!({
+            "response_mime_type": "application/json"
+        });
+        if let Some(schema) = gemini_schema {
+            generation_config["responseSchema"] = schema;
+        }
+
         let body = json!({
             "system_instruction": {
                 "parts": [{ "text": system_prompt }]
@@ -398,9 +466,7 @@ impl AiProvider for GeminiClient {
                 "role": "user",
                 "parts": [{ "text": text_content }]
             }],
-            "generationConfig": {
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": generation_config
         });
 
         let response = self.generate_content(model, &body).await?;
@@ -537,6 +603,16 @@ You are receiving a PDF document. Your tasks are:
             "Transcribe the attached PDF document.".to_string()
         };
 
+        let response_format = crate::ai::classify::classified_note_response_format();
+        let gemini_schema = extract_gemini_schema(&response_format);
+
+        let mut generation_config = json!({
+            "response_mime_type": "application/json"
+        });
+        if let Some(schema) = gemini_schema {
+            generation_config["responseSchema"] = schema;
+        }
+
         let body = json!({
             "system_instruction": {
                 "parts": [{ "text": system_prompt }]
@@ -555,9 +631,7 @@ You are receiving a PDF document. Your tasks are:
                     }
                 ]
             }],
-            "generationConfig": {
-                "response_mime_type": "application/json"
-            }
+            "generationConfig": generation_config
         });
 
         let response = self.generate_content(model, &body).await?;
@@ -593,5 +667,53 @@ mod tests {
         let (mime, data) = parse_data_uri(uri);
         assert_eq!(mime, "image/jpeg");
         assert_eq!(data, "/9j/4AAQSkZJRg==");
+    }
+
+    #[test]
+    fn test_convert_to_gemini_schema_removes_null_union_and_additional_properties() {
+        let input_schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "frontmatter": {
+                    "type": ["object", "null"],
+                    "additionalProperties": true
+                }
+            }
+        });
+
+        let output = convert_to_gemini_schema(input_schema);
+        
+        assert_eq!(output["properties"]["frontmatter"]["type"], json!("object"));
+        assert!(output.get("additionalProperties").is_none());
+        assert!(output["properties"]["frontmatter"].get("additionalProperties").is_none());
+    }
+
+    #[test]
+    fn test_extract_gemini_schema_success() {
+        let response_format = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "test_schema",
+                "strict": true,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "tags": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        }
+                    }
+                }
+            }
+        });
+
+        let schema = extract_gemini_schema(&response_format).expect("should extract");
+        assert_eq!(schema["type"], json!("object"));
+        assert_eq!(schema["properties"]["tags"]["type"], json!("array"));
+        assert_eq!(schema["properties"]["tags"]["items"]["type"], json!("string"));
     }
 }
