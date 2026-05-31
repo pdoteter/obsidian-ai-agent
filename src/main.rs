@@ -323,10 +323,32 @@ async fn handle_message(
             transcript_pending,
         )
         .await
+    } else if let Some(doc) = msg.document() {
+        if doc.mime_type.as_ref().map(|m| m.as_ref()) == Some("application/pdf")
+            || doc.file_name.as_ref().map(|f| f.ends_with(".pdf")).unwrap_or(false)
+        {
+            handlers::pdf::handle_pdf_message(
+                bot,
+                msg,
+                config,
+                ai_service,
+                vault,
+                sync_notifier,
+                chat_tracker,
+            )
+            .await
+        } else {
+            bot.send_message(
+                msg.chat.id,
+                "I currently only support PDF documents. Please send a valid PDF!",
+            )
+            .await?;
+            Ok(())
+        }
     } else {
         bot.send_message(
             msg.chat.id,
-            "I can process text, voice, and photo messages. Please send one of those!",
+            "I can process text, voice, photo, and PDF messages. Please send one of those!",
         )
         .await?;
         Ok(())

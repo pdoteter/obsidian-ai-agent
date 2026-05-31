@@ -60,6 +60,13 @@ pub trait AiProvider: Send + Sync {
         messages: Vec<ChatMessage>,
         max_tokens: Option<u32>,
     ) -> Result<String, AiError>;
+
+    async fn transcribe_pdf(
+        &self,
+        pdf_bytes: &[u8],
+        user_prompt: Option<&str>,
+        model: &str,
+    ) -> Result<ClassifiedNote, AiError>;
 }
 
 /// Orchestrator that routes AI tasks to the configured providers
@@ -164,6 +171,16 @@ impl AiService {
         let provider = self.get_provider(&self.classification_provider)?;
         provider.chat_completion(model, messages, max_tokens).await
     }
+
+    pub async fn transcribe_pdf(
+        &self,
+        pdf_bytes: &[u8],
+        user_prompt: Option<&str>,
+        model: &str,
+    ) -> Result<ClassifiedNote, AiError> {
+        let provider = self.get_provider(&self.classification_provider)?;
+        provider.transcribe_pdf(pdf_bytes, user_prompt, model).await
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +252,20 @@ mod tests {
             _t: Option<u32>,
         ) -> Result<String, AiError> {
             Ok(format!("chat by {}", self.name))
+        }
+        async fn transcribe_pdf(
+            &self,
+            _pdf_bytes: &[u8],
+            _user_prompt: Option<&str>,
+            _model: &str,
+        ) -> Result<ClassifiedNote, AiError> {
+            Ok(ClassifiedNote {
+                category: NoteCategory::Log,
+                summary: format!("pdf title by {}", self.name),
+                markdown: format!("pdf transcription by {}", self.name),
+                tags: vec!["mock".to_string()],
+                frontmatter: None,
+            })
         }
     }
 
@@ -317,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_ai_service_from_yaml() {
-        let yaml = r#"
+        let _yaml = r#"
 vault_path: "."
 ai:
   provider: "global"

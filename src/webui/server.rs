@@ -67,6 +67,7 @@ pub async fn start_server(state: WebuiState, port: u16) {
         .route("/api/message", post(post_text_message))
         .route("/api/photo", post(post_photo_message))
         .route("/api/voice", post(post_voice_message))
+        .route("/api/pdf", post(post_pdf_message))
         // Real-time updates WebSocket
         .route("/ws", get(ws_handler))
         .with_state(state);
@@ -132,6 +133,12 @@ async fn serve_asset(
                 "image/gif"
             } else if filename.ends_with(".webp") {
                 "image/webp"
+            } else if filename.ends_with(".pdf") {
+                "application/pdf"
+            } else if filename.ends_with(".md") {
+                "text/markdown"
+            } else if filename.ends_with(".txt") {
+                "text/plain"
             } else {
                 "image/jpeg"
             };
@@ -379,6 +386,74 @@ async fn post_voice_message(
             })).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process voice note: {}", e)).into_response(),
+    }
+}
+
+// POST /api/pdf - Submit a PDF multipart file
+#[derive(Serialize)]
+struct PdfMessageResponse {
+    pdf_filename: String,
+    transcript_filename: String,
+    title: String,
+    gemini_success: bool,
+}
+
+async fn post_pdf_message(
+    headers: HeaderMap,
+    State(state): State<WebuiState>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.config) {
+        return (status, "Unauthorized").into_response();
+    }
+    
+    let mut pdf_bytes = Vec::new();
+    let mut caption = None;
+    let mut original_filename = None;
+    
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            original_filename = field.file_name().map(|f| f.to_string());
+            if let Ok(bytes) = field.bytes().await {
+                pdf_bytes = bytes.to_vec();
+            }
+        } else if name == "caption" {
+            if let Ok(text) = field.text().await {
+                if !text.trim().is_empty() {
+                    caption = Some(text);
+                }
+            }
+        }
+    }
+    
+    if pdf_bytes.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing PDF file payload").into_response();
+    }
+    
+    let result = crate::handlers::pdf::process_pdf_entry(
+        &pdf_bytes,
+        original_filename.as_deref(),
+        caption.as_deref(),
+        &state.config,
+        &state.ai_service,
+        &state.vault,
+        state.sync_notifier.as_ref(),
+    )
+    .await;
+    
+    match result {
+        Ok((pdf_filename, transcript_filename, title, gemini_success)) => {
+            broadcast_note_update(&state).await;
+            let response = PdfMessageResponse {
+                pdf_filename,
+                transcript_filename,
+                title,
+                gemini_success,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process PDF note: {}", e)).into_response(),
     }
 }
 

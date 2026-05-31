@@ -6,6 +6,7 @@ import * as path from 'path';
 const testVaultPath = path.resolve(__dirname, '../test-vault');
 const dummyImagePath = path.join(__dirname, 'dummy-photo.jpg');
 const dummyAudioPath = path.join(__dirname, 'dummy-voice.wav');
+const dummyPdfPath = path.join(__dirname, 'dummy-document.pdf');
 
 // Helper to find the active daily note file on disk
 function getTodayDailyNotePath(): string {
@@ -54,12 +55,34 @@ test.describe('Obsidian AI Agent WebUI End-to-End Tests', () => {
     const silence = Buffer.alloc(dataSize); // filled with zeros (PCM silence)
     const wavBuffer = Buffer.concat([header, silence]);
     fs.writeFileSync(dummyAudioPath, wavBuffer);
+
+    // Tiny dummy PDF content starting with standard %PDF magic header
+    const dummyPdfContent = `%PDF-1.4
+1 0 obj <</Type /Catalog /Pages 2 0 R>> endobj
+2 0 obj <</Type /Pages /Kids [3 0 R] /Count 1>> endobj
+3 0 obj <</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R>> endobj
+4 0 obj <</Length 22>> stream
+BT /F1 12 Tf ET
+endstream endobj
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000056 00000 n 
+0000000111 00000 n 
+0000000212 00000 n 
+trailer <</Size 5 /Root 1 0 R>>
+startxref
+285
+%%EOF`;
+    fs.writeFileSync(dummyPdfPath, dummyPdfContent);
   });
 
   test.afterAll(() => {
     // Clean up temporary E2E assets
     if (fs.existsSync(dummyImagePath)) fs.unlinkSync(dummyImagePath);
     if (fs.existsSync(dummyAudioPath)) fs.unlinkSync(dummyAudioPath);
+    if (fs.existsSync(dummyPdfPath)) fs.unlinkSync(dummyPdfPath);
   });
 
   test('01 - Block unauthorized sessions & grant access on valid passcode', async ({ page }) => {
@@ -225,5 +248,59 @@ test.describe('Obsidian AI Agent WebUI End-to-End Tests', () => {
     const noteFilePath = getTodayDailyNotePath();
     const noteContent = fs.readFileSync(noteFilePath, 'utf-8');
     expect(noteContent).not.toBeNull();
+  });
+
+  test('05 - E2E PDF upload with fallback check and asset reference verification', async ({ page }) => {
+    await page.goto('/?token=test_token');
+    await expect(page.locator('#auth-gateway')).toBeHidden();
+
+    // Hook file upload input
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.locator('#attach-btn').click();
+    const fileChooser = await fileChooserPromise;
+    
+    // Upload dummy silent PDF file
+    await fileChooser.setFiles(dummyPdfPath);
+
+    // Verify PDF thumbnail renders placeholder (PDFs render standard SVG icon)
+    const imagePreview = page.locator('#image-preview');
+    await expect(imagePreview).toBeVisible();
+    await expect(imagePreview).toHaveAttribute('src', /^data:image\/svg\+xml/);
+    
+    // Input caption
+    const inputArea = page.locator('#message-input');
+    await inputArea.fill('Test PDF upload capability validation');
+
+    // Send
+    await page.locator('#send-btn').click();
+
+    // Verify transcription/saving process activates
+    await expect(page.locator('#processing-indicator')).toBeVisible();
+
+    // Wait for bot response bubble (large timeout since it calls Gemini or fallback)
+    const botResponse = page.locator('.msg-bubble.bot').last();
+    await expect(botResponse).toBeVisible({ timeout: 60000 });
+    
+    // Check that PDF was saved (could be Gemini success or fallback depending on credentials)
+    const botText = await botResponse.innerText();
+    expect(botText.includes('Saved') || botText.includes('Logged')).toBe(true);
+
+    // Verify Daily Note preview shows reference
+    const dailyNotePreview = page.locator('#daily-note-markdown');
+    await expect(dailyNotePreview).toBeVisible();
+    await expect(dailyNotePreview).toContainText('Document:');
+
+    // Verify file actually copied into Obsidian's assets folder
+    const noteFilePath = getTodayDailyNotePath();
+    const noteContent = fs.readFileSync(noteFilePath, 'utf-8');
+    expect(noteContent).toContain('Original PDF');
+    expect(noteContent).toContain('[[assets/');
+
+    const noteDir = path.dirname(noteFilePath);
+    const assetsFolder = path.join(noteDir, 'assets');
+    expect(fs.existsSync(assetsFolder)).toBe(true);
+
+    const assetFiles = fs.readdirSync(assetsFolder);
+    expect(assetFiles.some(f => f.endsWith('.pdf'))).toBe(true);
   });
 });
