@@ -18,9 +18,9 @@ use teloxide::prelude::*;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+use ai::providers::gemini::GeminiClient;
 use ai::providers::openai_whisper::WhisperClient;
 use ai::providers::openrouter::OpenRouterClient;
-use ai::providers::gemini::GeminiClient;
 use ai::{AiProvider, AiService};
 use config::Config;
 use git::chat_tracker;
@@ -90,7 +90,9 @@ async fn main() {
     match GeminiClient::new(
         config.gemini_api_key.clone(),
         config.gemini_service_account_key_path.clone(),
-    ).await {
+    )
+    .await
+    {
         Ok(c) => {
             providers.insert("gemini".to_string(), Arc::new(c));
         }
@@ -167,7 +169,10 @@ async fn main() {
                 info!("**********************************************************");
                 info!("⚠️  WebUI: No WEBUI_AUTH_TOKEN configured!");
                 info!("🔑 Generated temporary Access Token: {}", generated);
-                info!("👉 Access the portal at: http://127.0.0.1:{}?token={}", config.webui_port, generated);
+                info!(
+                    "👉 Access the portal at: http://127.0.0.1:{}?token={}",
+                    config.webui_port, generated
+                );
                 info!("**********************************************************");
                 Some(generated)
             }

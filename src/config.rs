@@ -785,14 +785,8 @@ git:
             Option<String>,
         ),
     ) {
-        let (
-            old_config,
-            old_teloxide,
-            old_openrouter,
-            old_openai,
-            old_gemini,
-            old_gemini_sa,
-        ) = old_env;
+        let (old_config, old_teloxide, old_openrouter, old_openai, old_gemini, old_gemini_sa) =
+            old_env;
         match old_config {
             Some(v) => env::set_var("CONFIG_PATH", v),
             None => env::remove_var("CONFIG_PATH"),

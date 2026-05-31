@@ -31,7 +31,10 @@ impl std::fmt::Debug for GeminiClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeminiClient")
             .field("api_key", &self.api_key.as_ref().map(|_| "***"))
-            .field("oauth_authenticator", &self.oauth_authenticator.as_ref().map(|_| "Some"))
+            .field(
+                "oauth_authenticator",
+                &self.oauth_authenticator.as_ref().map(|_| "Some"),
+            )
             .finish()
     }
 }
@@ -52,41 +55,51 @@ impl GeminiClient {
             info!(path = %path.display(), "Initializing Gemini with Service Account OAuth2");
             let secret = yup_oauth2::read_service_account_key(&path)
                 .await
-                .map_err(|e| AiError::UnsupportedCapability(format!("Failed to read Service Account key: {}", e)))?;
-            
+                .map_err(|e| {
+                    AiError::UnsupportedCapability(format!(
+                        "Failed to read Service Account key: {}",
+                        e
+                    ))
+                })?;
+
             let auth = yup_oauth2::ServiceAccountAuthenticator::builder(secret)
                 .build()
                 .await
-                .map_err(|e| AiError::UnsupportedCapability(format!("Failed to build Service Account Authenticator: {}", e)))?;
-            
+                .map_err(|e| {
+                    AiError::UnsupportedCapability(format!(
+                        "Failed to build Service Account Authenticator: {}",
+                        e
+                    ))
+                })?;
+
             oauth_authenticator = Some(auth);
         } else if api_key.is_none() {
             // No API key or SA path provided: try to fall back to Application Default Credentials (ADC)
             info!("No Gemini API key or Service Account path provided. Trying Application Default Credentials (ADC) OAuth2...");
             let opts = yup_oauth2::ApplicationDefaultCredentialsFlowOpts::default();
             match yup_oauth2::ApplicationDefaultCredentialsAuthenticator::builder(opts).await {
-                yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes::ServiceAccount(builder) => {
-                    match builder.build().await {
-                        Ok(auth) => {
-                            info!("Successfully initialized Gemini with Service Account ADC OAuth2");
-                            oauth_authenticator = Some(auth);
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Could not build Service Account ADC authenticator");
-                        }
+                yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes::ServiceAccount(
+                    builder,
+                ) => match builder.build().await {
+                    Ok(auth) => {
+                        info!("Successfully initialized Gemini with Service Account ADC OAuth2");
+                        oauth_authenticator = Some(auth);
                     }
-                }
-                yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes::InstanceMetadata(builder) => {
-                    match builder.build().await {
-                        Ok(auth) => {
-                            info!("Successfully initialized Gemini with Instance Metadata ADC OAuth2");
-                            oauth_authenticator = Some(auth);
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Could not build Instance Metadata ADC authenticator");
-                        }
+                    Err(e) => {
+                        warn!(error = %e, "Could not build Service Account ADC authenticator");
                     }
-                }
+                },
+                yup_oauth2::authenticator::ApplicationDefaultCredentialsTypes::InstanceMetadata(
+                    builder,
+                ) => match builder.build().await {
+                    Ok(auth) => {
+                        info!("Successfully initialized Gemini with Instance Metadata ADC OAuth2");
+                        oauth_authenticator = Some(auth);
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Could not build Instance Metadata ADC authenticator");
+                    }
+                },
             }
         } else {
             info!("Initializing Gemini with standard API Key authentication");
@@ -112,18 +125,21 @@ impl GeminiClient {
                 "https://www.googleapis.com/auth/generative-language",
                 "https://www.googleapis.com/auth/cloud-platform",
             ];
-            let token_res = auth.token(scopes).await.map_err(|e| {
-                AiError::ProviderError {
+            let token_res = auth
+                .token(scopes)
+                .await
+                .map_err(|e| AiError::ProviderError {
                     status: 401,
                     message: format!("Failed to acquire Google OAuth 2.0 token: {}", e),
-                }
-            })?;
-            
+                })?;
+
             if let Some(tok) = token_res.token() {
                 return Ok(tok.to_string());
             }
         }
-        Err(AiError::UnsupportedCapability("OAuth authenticator is not configured".to_string()))
+        Err(AiError::UnsupportedCapability(
+            "OAuth authenticator is not configured".to_string(),
+        ))
     }
 
     /// Make a chat generation request to Gemini with automatic retry
@@ -133,7 +149,10 @@ impl GeminiClient {
 
         for attempt in 0..=MAX_RETRIES {
             let url = format!("{}/models/{}:generateContent", GEMINI_BASE_URL, clean_model);
-            let mut req = self.http.post(&url).header("Content-Type", "application/json");
+            let mut req = self
+                .http
+                .post(&url)
+                .header("Content-Type", "application/json");
 
             // Attach OAuth bearer token or API key
             if self.oauth_authenticator.is_some() {
@@ -360,7 +379,10 @@ impl AiProvider for GeminiClient {
             "URL: {}\nTitle: {}\nDescription: {}\nContent:\n{}",
             page_content.url,
             page_content.title.as_deref().unwrap_or("[No Title]"),
-            page_content.description.as_deref().unwrap_or("[No Description]"),
+            page_content
+                .description
+                .as_deref()
+                .unwrap_or("[No Description]"),
             page_content.body_text
         );
 
@@ -454,7 +476,11 @@ impl AiProvider for GeminiClient {
                     "parts": [{ "text": m.content }]
                 }));
             } else {
-                let role = if m.role == "assistant" { "model" } else { "user" };
+                let role = if m.role == "assistant" {
+                    "model"
+                } else {
+                    "user"
+                };
                 contents.push(json!({
                     "role": role,
                     "parts": [{ "text": m.content }]
