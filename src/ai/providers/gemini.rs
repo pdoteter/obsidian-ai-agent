@@ -237,9 +237,38 @@ impl GeminiClient {
     /// Extract generated text response from Gemini generateContent JSON response
     fn extract_content(response: &Value) -> Result<String, AiError> {
         // Gemini response structure path: candidates[0].content.parts[0].text
-        response["candidates"]
+        let candidate = response["candidates"]
             .get(0)
-            .and_then(|c| c["content"]["parts"].get(0))
+            .ok_or_else(|| {
+                AiError::ParseError(format!(
+                    "No candidates in Gemini response. Raw response: {:?}",
+                    response
+                ))
+            })?;
+
+        // Check finishReason — if MAX_TOKENS, the output was truncated
+        if let Some(finish_reason) = candidate["finishReason"].as_str() {
+            if finish_reason == "MAX_TOKENS" {
+                let partial_text = candidate["content"]["parts"]
+                    .get(0)
+                    .and_then(|p| p["text"].as_str())
+                    .unwrap_or("");
+                return Err(AiError::ParseError(format!(
+                    "Gemini response was truncated (finishReason=MAX_TOKENS). \
+                     Increase max_tokens. Partial output: {}",
+                    partial_text
+                )));
+            }
+            if finish_reason != "STOP" {
+                warn!(
+                    finish_reason = finish_reason,
+                    "Gemini response finished with non-STOP reason"
+                );
+            }
+        }
+
+        candidate["content"]["parts"]
+            .get(0)
             .and_then(|p| p["text"].as_str())
             .map(|s| s.to_string())
             .ok_or_else(|| {
@@ -727,5 +756,49 @@ mod tests {
             schema["properties"]["tags"]["items"]["type"],
             json!("string")
         );
+    }
+
+    #[test]
+    fn test_extract_content_truncated_max_tokens() {
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{ "text": "{\"type\":" }]
+                },
+                "finishReason": "MAX_TOKENS"
+            }]
+        });
+
+        let result = GeminiClient::extract_content(&response);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("truncated"), "Error should mention truncation: {}", err);
+        assert!(err.contains("MAX_TOKENS"), "Error should mention MAX_TOKENS: {}", err);
+    }
+
+    #[test]
+    fn test_extract_content_normal_stop() {
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{ "text": "{\"type\": \"transaction\"}" }]
+                },
+                "finishReason": "STOP"
+            }]
+        });
+
+        let result = GeminiClient::extract_content(&response);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "{\"type\": \"transaction\"}");
+    }
+
+    #[test]
+    fn test_extract_content_no_candidates() {
+        let response = json!({
+            "candidates": []
+        });
+
+        let result = GeminiClient::extract_content(&response);
+        assert!(result.is_err());
     }
 }

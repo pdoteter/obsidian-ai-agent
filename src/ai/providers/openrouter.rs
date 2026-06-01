@@ -107,9 +107,32 @@ impl OpenRouterClient {
 
     /// Extract the content string from a chat completion response
     fn extract_content(response: &Value) -> Result<String, AiError> {
-        response["choices"]
+        let choice = response["choices"]
             .get(0)
-            .and_then(|c| c["message"]["content"].as_str())
+            .ok_or_else(|| AiError::ParseError("No choices in response".to_string()))?;
+
+        // Check finish_reason — 'length' means the output was truncated due to max_tokens
+        if let Some(finish_reason) = choice["finish_reason"].as_str() {
+            if finish_reason == "length" {
+                let partial_text = choice["message"]["content"]
+                    .as_str()
+                    .unwrap_or("");
+                return Err(AiError::ParseError(format!(
+                    "Response was truncated (finish_reason=length). \
+                     Increase max_tokens. Partial output: {}",
+                    partial_text
+                )));
+            }
+            if finish_reason != "stop" {
+                warn!(
+                    finish_reason = finish_reason,
+                    "Chat completion finished with non-stop reason"
+                );
+            }
+        }
+
+        choice["message"]["content"]
+            .as_str()
             .map(|s| s.to_string())
             .ok_or_else(|| AiError::ParseError("No content in response".to_string()))
     }
