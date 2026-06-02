@@ -20,16 +20,17 @@ const REQUEST_TIMEOUT_SECS: u64 = 120;
 pub struct OpenRouterClient {
     http: Client,
     api_key: String,
+    max_tokens: u32,
 }
 
 impl OpenRouterClient {
-    pub fn new(api_key: String) -> Result<Self, AiError> {
+    pub fn new(api_key: String, max_tokens: u32) -> Result<Self, AiError> {
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .pool_max_idle_per_host(5)
             .build()?;
 
-        Ok(Self { http, api_key })
+        Ok(Self { http, api_key, max_tokens })
     }
 
     /// Make a chat completion request with automatic retry on rate limits and server errors
@@ -160,7 +161,7 @@ impl AiProvider for OpenRouterClient {
             crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT,
             guide,
         );
-        let body = crate::ai::classify::build_text_request_body(text, model, &system_prompt);
+        let body = crate::ai::classify::build_text_request_body(text, model, &system_prompt, self.max_tokens);
 
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
@@ -191,6 +192,7 @@ impl AiProvider for OpenRouterClient {
             exif_context,
             model,
             &system_prompt,
+            self.max_tokens,
         );
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
@@ -216,6 +218,7 @@ impl AiProvider for OpenRouterClient {
             user_text,
             model,
             &system_prompt,
+            self.max_tokens,
         );
 
         let response = self.chat_completion(&body).await?;
@@ -258,6 +261,7 @@ impl AiProvider for OpenRouterClient {
             video_title,
             raw_transcript,
             &guide_content,
+            self.max_tokens,
         );
 
         let response = self.chat_completion(&body).await?;

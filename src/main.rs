@@ -63,7 +63,7 @@ async fn main() {
     let mut providers: HashMap<String, Arc<dyn AiProvider>> = HashMap::new();
 
     // OpenRouter Provider
-    let openrouter = match OpenRouterClient::new(config.openrouter_api_key.clone()) {
+    let openrouter = match OpenRouterClient::new(config.openrouter_api_key.clone(), config.ai_max_tokens) {
         Ok(c) => Arc::new(c),
         Err(e) => {
             error!(error = %e, "Failed to create OpenRouter client");
@@ -90,6 +90,7 @@ async fn main() {
     match GeminiClient::new(
         config.gemini_api_key.clone(),
         config.gemini_service_account_key_path.clone(),
+        config.ai_max_tokens,
     )
     .await
     {

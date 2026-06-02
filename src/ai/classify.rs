@@ -231,7 +231,7 @@ pub fn classified_note_response_format() -> serde_json::Value {
     })
 }
 
-pub fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> serde_json::Value {
+pub fn build_text_request_body(text: &str, model: &str, system_prompt: &str, max_tokens: u32) -> serde_json::Value {
     json!({
         "model": model,
         "messages": [
@@ -245,7 +245,7 @@ pub fn build_text_request_body(text: &str, model: &str, system_prompt: &str) -> 
             }
         ],
         "response_format": classified_note_response_format(),
-        "max_tokens": 4096
+        "max_tokens": max_tokens
     })
 }
 
@@ -255,6 +255,7 @@ pub fn build_image_request_body(
     exif_context: &str,
     model: &str,
     system_prompt: &str,
+    max_tokens: u32,
 ) -> serde_json::Value {
     let text_content = if let Some(cap) = caption {
         if exif_context.is_empty() {
@@ -292,7 +293,7 @@ pub fn build_image_request_body(
             }
         ],
         "response_format": classified_note_response_format(),
-        "max_tokens": 4096
+        "max_tokens": max_tokens
     })
 }
 
@@ -436,6 +437,7 @@ mod tests {
             "Photo taken: 2026:03:24 18:30:00.",
             "google/gemini-2.5-flash",
             "system prompt",
+            4096,
         );
 
         assert_eq!(body["model"], json!("google/gemini-2.5-flash"));
@@ -498,20 +500,21 @@ mod tests {
     #[test]
     fn test_build_text_request_body_includes_max_tokens() {
         let body =
-            build_text_request_body("test input", "google/gemini-2.5-flash", "system prompt");
+            build_text_request_body("test input", "google/gemini-2.5-flash", "system prompt", 4096);
         assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
-    }
+     }
 
-    #[test]
-    fn test_build_image_request_body_includes_max_tokens() {
-        let body = build_image_request_body(
-            "data:image/jpeg;base64,abc123",
-            Some("Test caption"),
-            "EXIF context",
-            "google/gemini-2.5-flash",
-            "system prompt",
-        );
-        assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
+     #[test]
+     fn test_build_image_request_body_includes_max_tokens() {
+         let body = build_image_request_body(
+             "data:image/jpeg;base64,abc123",
+             Some("Test caption"),
+             "EXIF context",
+             "google/gemini-2.5-flash",
+             "system prompt",
+             4096,
+         );
+         assert_eq!(body["max_tokens"], json!(4096), "max_tokens should be 4096");
     }
 
     #[test]

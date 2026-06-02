@@ -46,6 +46,7 @@ pub fn build_url_request_body(
     user_text: Option<&str>,
     model: &str,
     system_prompt: &str,
+    max_tokens: u32,
 ) -> serde_json::Value {
     let user_prompt = build_url_user_prompt(page_content, user_text);
 
@@ -62,7 +63,7 @@ pub fn build_url_request_body(
             }
         ],
         "response_format": url_summary_response_format(),
-        "max_tokens": 4096
+        "max_tokens": max_tokens
     })
 }
 
@@ -123,6 +124,7 @@ mod tests {
             Some("Please focus on implementation details"),
             "google/gemini-2.5-flash",
             "system prompt",
+            4096,
         );
 
         assert_eq!(body["model"], json!("google/gemini-2.5-flash"));
