@@ -26,6 +26,7 @@ pub fn build_transcript_format_body(
     video_title: &str,
     raw_transcript: &str,
     guide_content: &str,
+    max_tokens: u32,
 ) -> serde_json::Value {
     let guide = if guide_content.trim().is_empty() {
         None
@@ -52,6 +53,6 @@ pub fn build_transcript_format_body(
                 "content": user_prompt
             }
         ],
-        "max_tokens": 4096
+        "max_tokens": max_tokens
     })
 }

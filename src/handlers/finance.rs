@@ -300,6 +300,56 @@ async fn handle_text_inner(
     text: &str,
     photo_wiki_link: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let text = text.trim();
+    if text == "/finance_tokens" {
+        let classify = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
+        let query = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
+        let transaction = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+        let reply = format!(
+            "<b>📊 Current Finance Bot max_tokens limits:</b>\n\
+             • Classify: <code>{}</code>\n\
+             • Query: <code>{}</code>\n\
+             • Transaction Update: <code>{}</code>\n\n\
+             To change a limit, use:\n\
+             <code>/set_finance_tokens &lt;classify|query|transaction&gt; &lt;value&gt;</code>",
+            classify, query, transaction
+        );
+        bot.send_message(msg.chat.id, reply)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await?;
+        return Ok(());
+    } else if text.starts_with("/set_finance_tokens") {
+        let parts: Vec<&str> = text.split_whitespace().collect();
+        let reply = if parts.len() == 3 {
+            let target = parts[1].to_lowercase();
+            if let Ok(val) = parts[2].parse::<u32>() {
+                match target.as_str() {
+                    "classify" => {
+                        config.max_tokens_classify.store(val, std::sync::atomic::Ordering::SeqCst);
+                        format!("✅ Updated <b>classify</b> max_tokens to <code>{}</code>", val)
+                    }
+                    "query" => {
+                        config.max_tokens_query.store(val, std::sync::atomic::Ordering::SeqCst);
+                        format!("✅ Updated <b>query</b> max_tokens to <code>{}</code>", val)
+                    }
+                    "transaction" | "update" => {
+                        config.max_tokens_transaction.store(val, std::sync::atomic::Ordering::SeqCst);
+                        format!("✅ Updated <b>transaction</b> max_tokens to <code>{}</code>", val)
+                    }
+                    _ => "❌ Unknown limit target. Use <code>classify</code>, <code>query</code>, or <code>transaction</code>.".to_string(),
+                }
+            } else {
+                "❌ Invalid token value. Must be a positive integer.".to_string()
+            }
+        } else {
+            "❌ Usage: <code>/set_finance_tokens &lt;classify|query|transaction&gt; &lt;value&gt;</code>".to_string()
+        };
+        bot.send_message(msg.chat.id, reply)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await?;
+        return Ok(());
+    }
+
     info!(
         text_length = text.len(),
         "Finance Bot: Processing message text"
@@ -476,8 +526,9 @@ Do not include any explanation or markdown formatting in your response. Return r
         },
     ];
 
+    let max_tokens = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(204800))
+        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -633,8 +684,9 @@ Please update the note and return the JSON object."#
         },
     ];
 
+    let max_tokens = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(2048))
+        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -737,8 +789,9 @@ Please answer."#
         },
     ];
 
+    let max_tokens = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(1024))
+        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
         .await?;
 
     Ok(response)

@@ -110,6 +110,9 @@ struct AiConfig {
     #[serde(default = "default_classify_model")]
     classify_model: String,
 
+    #[serde(default = "default_max_tokens")]
+    max_tokens: u32,
+
     #[serde(default)]
     transcription: TranscriptionConfig,
 
@@ -127,6 +130,7 @@ impl Default for AiConfig {
             whisper_model: default_whisper_model(),
             whisper_language: None,
             classify_model: default_classify_model(),
+            max_tokens: default_max_tokens(),
             transcription: TranscriptionConfig::default(),
             classification: TaskAiConfig::default(),
             summarization: TaskAiConfig::default(),
@@ -167,6 +171,9 @@ fn default_whisper_model() -> String {
 }
 fn default_classify_model() -> String {
     "google/gemini-2.5-flash".to_string()
+}
+fn default_max_tokens() -> u32 {
+    4096
 }
 fn default_date_display_format() -> String {
     "YYYY/MM/DD".to_string()
@@ -229,6 +236,10 @@ pub struct Config {
     pub webui_enabled: bool,
     pub webui_port: u16,
     pub webui_auth_token: Option<String>,
+    pub max_tokens_classify: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    pub max_tokens_query: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    pub max_tokens_transaction: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    pub ai_max_tokens: u32,
 }
 
 impl Default for Config {
@@ -265,6 +276,10 @@ impl Default for Config {
             webui_enabled: true,
             webui_port: 3000,
             webui_auth_token: None,
+            max_tokens_classify: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(8192)),
+            max_tokens_query: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(16384)),
+            max_tokens_transaction: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(16384)),
+            ai_max_tokens: 4096,
         }
     }
 }
@@ -389,6 +404,16 @@ impl Config {
             webui_enabled: file.webui.enabled,
             webui_port: file.webui.port,
             webui_auth_token,
+            max_tokens_classify: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(
+                file.finance.max_tokens_classify.unwrap_or(8192),
+            )),
+            max_tokens_query: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(
+                file.finance.max_tokens_query.unwrap_or(16384),
+            )),
+            max_tokens_transaction: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(
+                file.finance.max_tokens_transaction.unwrap_or(16384),
+            )),
+            ai_max_tokens: file.ai.max_tokens,
         })
     }
 
@@ -480,6 +505,9 @@ pub struct FinanceConfig {
     pub assets_folder: String,
     pub guide_path: Option<PathBuf>,
     pub allowed_user_ids: Vec<u64>,
+    pub max_tokens_classify: Option<u32>,
+    pub max_tokens_query: Option<u32>,
+    pub max_tokens_transaction: Option<u32>,
 }
 
 impl Default for FinanceConfig {
@@ -490,6 +518,9 @@ impl Default for FinanceConfig {
             assets_folder: "Assets".to_string(),
             guide_path: None,
             allowed_user_ids: Vec::new(),
+            max_tokens_classify: None,
+            max_tokens_query: None,
+            max_tokens_transaction: None,
         }
     }
 }
@@ -1042,6 +1073,17 @@ git:
     }
 
     #[test]
+    fn test_custom_finance_max_tokens() {
+        let file_config: FileConfig = serde_yml::from_str(
+            "vault_path: /tmp/vault\nfinance:\n  enabled: true\n  max_tokens_classify: 4000\n  max_tokens_query: 5000\n  max_tokens_transaction: 6000\n"
+        ).unwrap();
+
+        assert_eq!(file_config.finance.max_tokens_classify, Some(4000));
+        assert_eq!(file_config.finance.max_tokens_query, Some(5000));
+        assert_eq!(file_config.finance.max_tokens_transaction, Some(6000));
+    }
+
+    #[test]
     fn test_is_finance_user_allowed() {
         let mut config = Config::default();
         config.allowed_user_ids = vec![123, 456];
@@ -1104,5 +1146,21 @@ git:
             Err(ConfigError::Missing("FINANCE_TELOXIDE_TOKEN")) => Ok(()),
             _ => Err("Expected ConfigError::Missing(FINANCE_TELOXIDE_TOKEN)".to_string()),
         }
+    }
+
+    #[test]
+    fn test_config_atomic_tokens() {
+        let config = Config::default();
+        assert_eq!(config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst), 8192);
+        assert_eq!(config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst), 16384);
+        assert_eq!(config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst), 16384);
+
+        config.max_tokens_classify.store(4000, std::sync::atomic::Ordering::SeqCst);
+        config.max_tokens_query.store(5000, std::sync::atomic::Ordering::SeqCst);
+        config.max_tokens_transaction.store(6000, std::sync::atomic::Ordering::SeqCst);
+
+        assert_eq!(config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst), 4000);
+        assert_eq!(config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst), 5000);
+        assert_eq!(config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst), 6000);
     }
 }

@@ -25,6 +25,7 @@ pub struct GeminiClient {
     http: Client,
     api_key: Option<String>,
     oauth_authenticator: Option<YupAuthenticator>,
+    max_tokens: u32,
 }
 
 impl std::fmt::Debug for GeminiClient {
@@ -43,6 +44,7 @@ impl GeminiClient {
     pub async fn new(
         api_key: Option<String>,
         service_account_path: Option<std::path::PathBuf>,
+        max_tokens: u32,
     ) -> Result<Self, AiError> {
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -115,6 +117,7 @@ impl GeminiClient {
             http,
             api_key,
             oauth_authenticator,
+            max_tokens,
         })
     }
 
@@ -358,7 +361,8 @@ impl AiProvider for GeminiClient {
         let gemini_schema = extract_gemini_schema(&response_format);
 
         let mut generation_config = json!({
-            "response_mime_type": "application/json"
+            "response_mime_type": "application/json",
+            "maxOutputTokens": self.max_tokens
         });
         if let Some(schema) = gemini_schema {
             generation_config["responseSchema"] = schema;
@@ -415,7 +419,8 @@ impl AiProvider for GeminiClient {
         let gemini_schema = extract_gemini_schema(&response_format);
 
         let mut generation_config = json!({
-            "response_mime_type": "application/json"
+            "response_mime_type": "application/json",
+            "maxOutputTokens": self.max_tokens
         });
         if let Some(schema) = gemini_schema {
             generation_config["responseSchema"] = schema;
@@ -481,7 +486,8 @@ impl AiProvider for GeminiClient {
         let gemini_schema = extract_gemini_schema(&response_format);
 
         let mut generation_config = json!({
-            "response_mime_type": "application/json"
+            "response_mime_type": "application/json",
+            "maxOutputTokens": self.max_tokens
         });
         if let Some(schema) = gemini_schema {
             generation_config["responseSchema"] = schema;
@@ -549,7 +555,10 @@ impl AiProvider for GeminiClient {
             "contents": [{
                 "role": "user",
                 "parts": [{ "text": text_content }]
-            }]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": self.max_tokens
+            }
         });
 
         let response = self.generate_content(model, &body).await?;
@@ -643,7 +652,8 @@ You are receiving a PDF document. Your tasks are:
         let gemini_schema = extract_gemini_schema(&response_format);
 
         let mut generation_config = json!({
-            "response_mime_type": "application/json"
+            "response_mime_type": "application/json",
+            "maxOutputTokens": self.max_tokens
         });
         if let Some(schema) = gemini_schema {
             generation_config["responseSchema"] = schema;
