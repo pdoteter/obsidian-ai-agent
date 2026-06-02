@@ -477,7 +477,7 @@ Do not include any explanation or markdown formatting in your response. Return r
     ];
 
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(256))
+        .chat_completion(&config.openrouter_model_classify, messages, Some(2048))
         .await?;
 
     let cleaned = clean_json_response(&response);
