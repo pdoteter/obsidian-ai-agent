@@ -1,7 +1,8 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
 use axum::{
-    extract::{Multipart, Query, State, WebSocketUpgrade, ws::{Message as WsMessage, WebSocket}},
+    extract::{
+        ws::{Message as WsMessage, WebSocket},
+        Multipart, Query, State, WebSocketUpgrade,
+    },
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -9,6 +10,8 @@ use axum::{
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
@@ -42,7 +45,10 @@ pub struct WebuiState {
 /// Start the concurrent Axum WebUI/API server
 pub async fn start_server(state: WebuiState, port: u16) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    info!(port = port, "Starting concurrent WebUI server on http://0.0.0.0:{}...", port);
+    info!(
+        port = port,
+        "Starting concurrent WebUI server on http://0.0.0.0:{}...", port
+    );
 
     // Spawn background task to listen for Vault writes and trigger WebuiEvent::NoteUpdate broadcasts
     if let Some(mut rx) = state.vault.subscribe_updates() {
@@ -110,20 +116,28 @@ async fn serve_asset(
 ) -> impl IntoResponse {
     let note_path = match state.vault.ensure_today().await {
         Ok(p) => p,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Vault error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Vault error: {}", e),
+            )
+                .into_response()
+        }
     };
-    
+
     let note_dir = match note_path.parent() {
         Some(p) => p,
         None => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid note path").into_response(),
     };
-    
-    let asset_path = note_dir.join(&state.config.image.assets_folder).join(&filename);
-    
+
+    let asset_path = note_dir
+        .join(&state.config.image.assets_folder)
+        .join(&filename);
+
     if !asset_path.exists() {
         return (StatusCode::NOT_FOUND, "Asset not found").into_response();
     }
-    
+
     match tokio::fs::read(&asset_path).await {
         Ok(bytes) => {
             let mime = if filename.ends_with(".png") {
@@ -135,14 +149,18 @@ async fn serve_asset(
             } else {
                 "image/jpeg"
             };
-            
+
             Response::builder()
                 .header("content-type", mime)
                 .body(axum::body::Body::from(bytes))
                 .unwrap()
                 .into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read asset: {}", e)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to read asset: {}", e),
+        )
+            .into_response(),
     }
 }
 
@@ -152,16 +170,16 @@ fn check_auth(headers: &HeaderMap, config: &Config) -> Result<(), StatusCode> {
         Some(t) => t,
         None => return Ok(()), // If no token is configured, allow all requests
     };
-    
+
     let auth_header = headers
         .get("Authorization")
         .and_then(|h| h.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
-        
+
     if !auth_header.starts_with("Bearer ") {
         return Err(StatusCode::UNAUTHORIZED);
     }
-    
+
     let token = auth_header.trim_start_matches("Bearer ");
     if token == expected_token {
         Ok(())
@@ -177,30 +195,46 @@ struct NoteResponse {
     content: String,
 }
 
-async fn get_daily_note(
-    headers: HeaderMap,
-    State(state): State<WebuiState>,
-) -> impl IntoResponse {
+async fn get_daily_note(headers: HeaderMap, State(state): State<WebuiState>) -> impl IntoResponse {
     if let Err(status) = check_auth(&headers, &state.config) {
         return (status, "Unauthorized").into_response();
     }
-    
+
     let note_path = match state.vault.ensure_today().await {
         Ok(p) => p,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Vault error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Vault error: {}", e),
+            )
+                .into_response()
+        }
     };
-    
+
     let date_str = note_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Today".to_string());
-        
+
     let content = match tokio::fs::read_to_string(&note_path).await {
         Ok(c) => c,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {}", e)).into_response(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("IO error: {}", e),
+            )
+                .into_response()
+        }
     };
-    
-    (StatusCode::OK, Json(NoteResponse { date: date_str, content })).into_response()
+
+    (
+        StatusCode::OK,
+        Json(NoteResponse {
+            date: date_str,
+            content,
+        }),
+    )
+        .into_response()
 }
 
 // Helper: Broadcast updated daily note content via WebSockets
@@ -209,14 +243,17 @@ async fn broadcast_note_update(state: &WebuiState) {
         Ok(p) => p,
         Err(_) => return,
     };
-    
+
     let date_str = note_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Today".to_string());
-        
+
     if let Ok(content) = tokio::fs::read_to_string(&note_path).await {
-        let event = WebuiEvent::NoteUpdate { date: date_str, content };
+        let event = WebuiEvent::NoteUpdate {
+            date: date_str,
+            content,
+        };
         let _ = state.ws_broadcast.send(event);
     }
 }
@@ -243,7 +280,7 @@ async fn post_text_message(
     if let Err(status) = check_auth(&headers, &state.config) {
         return (status, "Unauthorized").into_response();
     }
-    
+
     // Process text message through extracted text handler
     let result = crate::handlers::text::process_text_entry(
         &payload.text,
@@ -253,12 +290,12 @@ async fn post_text_message(
         state.sync_notifier.as_ref(),
     )
     .await;
-    
+
     match result {
         Ok((classified, ai_success)) => {
             // Push update to all WebSockets
             broadcast_note_update(&state).await;
-            
+
             let response = TextMessageResponse {
                 category: format!("{:?}", classified.category).to_lowercase(),
                 summary: classified.summary,
@@ -267,7 +304,11 @@ async fn post_text_message(
             };
             (StatusCode::OK, Json(response)).into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process note: {}", e)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to process note: {}", e),
+        )
+            .into_response(),
     }
 }
 
@@ -286,10 +327,10 @@ async fn post_photo_message(
     if let Err(status) = check_auth(&headers, &state.config) {
         return (status, "Unauthorized").into_response();
     }
-    
+
     let mut photo_bytes = Vec::new();
     let mut caption = None;
-    
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
@@ -304,11 +345,11 @@ async fn post_photo_message(
             }
         }
     }
-    
+
     if photo_bytes.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing photo file payload").into_response();
     }
-    
+
     let result = crate::handlers::photo::process_photo_entry(
         &photo_bytes,
         caption.as_deref(),
@@ -318,13 +359,21 @@ async fn post_photo_message(
         state.sync_notifier.as_ref(),
     )
     .await;
-    
+
     match result {
         Ok((filename, summary)) => {
             broadcast_note_update(&state).await;
-            (StatusCode::OK, Json(PhotoMessageResponse { filename, summary })).into_response()
+            (
+                StatusCode::OK,
+                Json(PhotoMessageResponse { filename, summary }),
+            )
+                .into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process photo note: {}", e)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to process photo note: {}", e),
+        )
+            .into_response(),
     }
 }
 
@@ -344,9 +393,9 @@ async fn post_voice_message(
     if let Err(status) = check_auth(&headers, &state.config) {
         return (status, "Unauthorized").into_response();
     }
-    
+
     let mut voice_bytes = Vec::new();
-    
+
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
@@ -355,11 +404,11 @@ async fn post_voice_message(
             }
         }
     }
-    
+
     if voice_bytes.is_empty() {
         return (StatusCode::BAD_REQUEST, "Missing audio file payload").into_response();
     }
-    
+
     let result = crate::handlers::voice::process_voice_entry(
         &voice_bytes,
         &state.config,
@@ -368,17 +417,25 @@ async fn post_voice_message(
         state.sync_notifier.as_ref(),
     )
     .await;
-    
+
     match result {
         Ok((transcript, classified)) => {
             broadcast_note_update(&state).await;
-            (StatusCode::OK, Json(VoiceMessageResponse {
-                transcript,
-                category: format!("{:?}", classified.category).to_lowercase(),
-                summary: classified.summary,
-            })).into_response()
+            (
+                StatusCode::OK,
+                Json(VoiceMessageResponse {
+                    transcript,
+                    category: format!("{:?}", classified.category).to_lowercase(),
+                    summary: classified.summary,
+                }),
+            )
+                .into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to process voice note: {}", e)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to process voice note: {}", e),
+        )
+            .into_response(),
     }
 }
 
@@ -394,7 +451,7 @@ async fn ws_handler(
     State(state): State<WebuiState>,
 ) -> impl IntoResponse {
     let expected_token = state.config.webui_auth_token.clone();
-    
+
     // Check WebSocket Auth Token
     if let Some(token) = expected_token {
         if query.token != token {
@@ -402,30 +459,33 @@ async fn ws_handler(
             return StatusCode::UNAUTHORIZED.into_response();
         }
     }
-    
+
     ws.on_upgrade(move |socket| handle_ws_session(socket, state))
 }
 
 async fn handle_ws_session(socket: WebSocket, state: WebuiState) {
     let (mut sender, mut receiver) = socket.split();
-    
+
     // Immediately send the active daily note contents to populate the frontend
     if let Ok(note_path) = state.vault.ensure_today().await {
         let date_str = note_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "Today".to_string());
-            
+
         if let Ok(content) = tokio::fs::read_to_string(&note_path).await {
-            let init_event = WebuiEvent::NoteUpdate { date: date_str, content };
+            let init_event = WebuiEvent::NoteUpdate {
+                date: date_str,
+                content,
+            };
             if let Ok(json) = serde_json::to_string(&init_event) {
                 let _ = sender.send(WsMessage::Text(json.into())).await;
             }
         }
     }
-    
+
     let mut ws_rx = state.ws_broadcast.subscribe();
-    
+
     // Keep checking for updates and broadcast events
     tokio::select! {
         // Broadcast listener
@@ -438,7 +498,7 @@ async fn handle_ws_session(socket: WebSocket, state: WebuiState) {
                 }
             }
         } => {}
-        
+
         // Connection listener (disconnect checking)
         _ = async {
             while let Some(msg) = receiver.next().await {
@@ -448,6 +508,6 @@ async fn handle_ws_session(socket: WebSocket, state: WebuiState) {
             }
         } => {}
     }
-    
+
     info!("WebSocket session closed cleanly");
 }

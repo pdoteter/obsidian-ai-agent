@@ -50,16 +50,13 @@ impl SyncNotifier {
 
         sync_running.store(true, Ordering::SeqCst);
 
-        let result = tokio::task::spawn_blocking(move || git_sync.pull_if_clean()).await;
+        let result = git_sync.pull_if_clean().await;
 
         sync_running.store(false, Ordering::SeqCst);
 
         match result {
-            Ok(inner) => inner.map(Some),
-            Err(error) => Err(GitError::CommandFailed {
-                command: "pre_write_pull".to_string(),
-                message: format!("spawn_blocking failed: {}", error),
-            }),
+            Ok(inner) => Ok(Some(inner)),
+            Err(error) => Err(error),
         }
     }
 }
@@ -156,11 +153,11 @@ pub fn spawn_debounced_sync(
                 let git = git_sync.clone();
                 let _git_guard = git_lock.lock().await;
                 sync_running.store(true, Ordering::SeqCst);
-                let result = tokio::task::spawn_blocking(move || git.full_sync()).await;
+                let result = git.full_sync().await;
                 sync_running.store(false, Ordering::SeqCst);
 
                 match result {
-                    Ok(Ok(sync_result)) => {
+                    Ok(sync_result) => {
                         match sync_result {
                             SyncResult::NothingToSync => {
                                 info!("Git sync: nothing to sync");
@@ -236,23 +233,20 @@ pub fn spawn_debounced_sync(
                                         // Execute resolution in blocking task
                                         let git = git_sync.clone();
                                         let resolution_clone = resolution.clone();
-                                        let exec_result = tokio::task::spawn_blocking(move || {
-                                            match resolution_clone {
-                                                super::conflict::ConflictResolution::Ours => {
-                                                    git.resolve_ours()
-                                                }
-                                                super::conflict::ConflictResolution::Theirs => {
-                                                    git.resolve_theirs()
-                                                }
-                                                super::conflict::ConflictResolution::Abort => {
-                                                    git.resolve_abort()
-                                                }
+                                        let exec_result = match resolution_clone {
+                                            super::conflict::ConflictResolution::Ours => {
+                                                git.resolve_ours().await
                                             }
-                                        })
-                                        .await;
+                                            super::conflict::ConflictResolution::Theirs => {
+                                                git.resolve_theirs().await
+                                            }
+                                            super::conflict::ConflictResolution::Abort => {
+                                                git.resolve_abort().await
+                                            }
+                                        };
 
                                         match exec_result {
-                                            Ok(Ok(())) => {
+                                            Ok(()) => {
                                                 info!("Conflict resolution executed successfully");
 
                                                 // Retry sync if resolution was Ours or Theirs
@@ -263,26 +257,19 @@ pub fn spawn_debounced_sync(
                                                         "Retrying sync after conflict resolution"
                                                     );
                                                     let git = git_sync.clone();
-                                                    let retry_result =
-                                                        tokio::task::spawn_blocking(move || {
-                                                            git.full_sync()
-                                                        })
-                                                        .await;
+                                                    let retry_result = git.full_sync().await;
 
                                                     match retry_result {
-                                                        Ok(Ok(retry_sync_result)) => {
+                                                        Ok(retry_sync_result) => {
                                                             info!(result = %retry_sync_result, "Retry sync completed");
                                                         }
-                                                        Ok(Err(e)) => {
-                                                            error!(error = %e, "Retry sync failed after conflict resolution");
-                                                        }
                                                         Err(e) => {
-                                                            error!(error = %e, "Retry sync task panicked");
+                                                            error!(error = %e, "Retry sync failed after conflict resolution");
                                                         }
                                                     }
                                                 }
                                             }
-                                            Ok(Err(e)) => {
+                                            Err(e) => {
                                                 error!(error = %e, "Failed to execute conflict resolution");
                                                 // Try to notify user
                                                 if let Err(send_err) = conflict_resolver.bot.send_message(
@@ -291,9 +278,6 @@ pub fn spawn_debounced_sync(
                                                 ).await {
                                                     error!(error = %send_err, "Failed to send error notification");
                                                 }
-                                            }
-                                            Err(e) => {
-                                                error!(error = %e, "Conflict resolution task panicked");
                                             }
                                         }
                                     }
@@ -310,11 +294,8 @@ pub fn spawn_debounced_sync(
                             }
                         }
                     }
-                    Ok(Err(e)) => {
-                        error!(error = %e, "Git sync failed");
-                    }
                     Err(e) => {
-                        error!(error = %e, "Git sync task panicked");
+                        error!(error = %e, "Git sync failed");
                     }
                 }
             }

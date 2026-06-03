@@ -70,14 +70,8 @@ pub async fn handle_text_message(
         .await?;
 
     // Process the text note entry (classify, write to daily note, notify sync)
-    let process_result = process_text_entry(
-        &text,
-        &config,
-        &ai_service,
-        &vault,
-        sync_notifier.as_ref(),
-    )
-    .await;
+    let process_result =
+        process_text_entry(&text, &config, &ai_service, &vault, sync_notifier.as_ref()).await;
 
     match process_result {
         Ok((classified, ai_success)) => {

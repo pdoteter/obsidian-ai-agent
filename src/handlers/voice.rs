@@ -90,8 +90,11 @@ pub async fn handle_voice_message(
         }
         Err(e) => {
             error!(error = %e, "Failed to process voice entry");
-            bot.send_message(msg.chat.id, format!("❌ Voice message processing failed: {}", e))
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                format!("❌ Voice message processing failed: {}", e),
+            )
+            .await?;
         }
     }
 

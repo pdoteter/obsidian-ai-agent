@@ -504,15 +504,14 @@ fn check_existing_position(note_content: &str) -> PositionCheck {
     if let Some(yaml) = frontmatter {
         if let Some(map) = yaml.as_mapping() {
             // Check position_size
-            let pos_size = map.get(&serde_yml::Value::String("position_size".to_string()))
-                .and_then(|v| {
-                    v.as_f64()
-                        .or_else(|| v.as_i64().map(|i| i as f64))
-                })
+            let pos_size = map
+                .get(&serde_yml::Value::String("position_size".to_string()))
+                .and_then(|v| v.as_f64().or_else(|| v.as_i64().map(|i| i as f64)))
                 .unwrap_or(0.0);
-            
+
             // Check status
-            let status = map.get(&serde_yml::Value::String("status".to_string()))
+            let status = map
+                .get(&serde_yml::Value::String("status".to_string()))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
@@ -571,7 +570,10 @@ async fn handle_transaction_update(
         if !check.has_position {
             warning_prefix.push_str("⚠️ Note: You do not have an active open position for this asset in your ledger.\n\n");
         } else if let Some(acct) = check.account {
-            warning_prefix.push_str(&format!("ℹ️ Active position found in account: **{}**.\n\n", acct));
+            warning_prefix.push_str(&format!(
+                "ℹ️ Active position found in account: **{}**.\n\n",
+                acct
+            ));
         }
     }
 
