@@ -37,8 +37,19 @@ pub async fn handle_text_message(
         }
     }
 
-    // Intercept Git commands
-    if text == "/git_refresh" {
+    // Intercept bot commands
+    if text == "/commands" {
+        let reply = "<b>📋 Available Commands:</b>\n\n\
+                     • <code>/commands</code> - Show this help message\n\
+                     • <code>/git_refresh</code> - Manually sync your vault with the remote Git repository\n\
+                     • <code>/git_force_refresh</code> - Discard all local vault changes and force-align with the remote\n\
+                     • <code>/finance_tokens</code> - View current finance bot AI token limits\n\
+                     • <code>/set_finance_tokens &lt;classify|query|transaction&gt; &lt;value&gt;</code> - Set a token limit";
+        bot.send_message(msg.chat.id, reply)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await?;
+        return Ok(());
+    } else if text == "/git_refresh" {
         if let Some(ref notifier) = sync_notifier {
             if notifier.is_busy() {
                 bot.send_message(

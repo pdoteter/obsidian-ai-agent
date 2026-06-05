@@ -260,7 +260,11 @@ async fn handle_photo_message(
         format!("[Attached photo describing: {}]", image_description)
     };
 
-    let wiki_link = format!("![[{}/{}]]", resolved_assets_folder, filename);
+    let wiki_link = format!(
+        "![[{}/{}]]",
+        config.finance.assets_folder.replace('\\', "/"),
+        filename
+    );
 
     handle_text_inner(
         bot,
@@ -301,7 +305,16 @@ async fn handle_text_inner(
     photo_wiki_link: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let text = text.trim();
-    if text == "/finance_tokens" {
+    if text == "/commands" {
+        let reply = "<b>📋 Available Finance Commands:</b>\n\n\
+                     • <code>/commands</code> - Show this help message\n\
+                     • <code>/finance_tokens</code> - View current finance bot AI token limits\n\
+                     • <code>/set_finance_tokens &lt;classify|query|transaction&gt; &lt;value&gt;</code> - Set a token limit";
+        bot.send_message(msg.chat.id, reply)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await?;
+        return Ok(());
+    } else if text == "/finance_tokens" {
         let classify = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
         let query = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
         let transaction = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
