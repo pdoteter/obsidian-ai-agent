@@ -274,14 +274,14 @@ pub async fn handle_url_message(
                         (Some(summary.title), Some(summary.summary), summary.tags)
                     }
                     Err(e) => {
-                        // Graceful degradation: AI failed -> title-only TODO
+                        // Graceful degradation: AI failed -> title-only fallback
                         error!(error = %e, url = %detected_url.url, "AI summarization failed");
                         (fetched_title, None, Vec::new())
                     }
                 }
             }
             Err(e) => {
-                // Graceful degradation: fetch failed -> plain URL TODO
+                // Graceful degradation: fetch failed -> plain URL fallback
                 error!(error = %e, url = %detected_url.url, "Failed to fetch URL content");
                 (None, None, Vec::new())
             }
