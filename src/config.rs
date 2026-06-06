@@ -113,6 +113,9 @@ struct AiConfig {
     #[serde(default = "default_max_tokens")]
     max_tokens: u32,
 
+    #[serde(default = "default_pdf_max_tokens")]
+    pdf_max_tokens: u32,
+
     #[serde(default)]
     transcription: TranscriptionConfig,
 
@@ -131,6 +134,7 @@ impl Default for AiConfig {
             whisper_language: None,
             classify_model: default_classify_model(),
             max_tokens: default_max_tokens(),
+            pdf_max_tokens: default_pdf_max_tokens(),
             transcription: TranscriptionConfig::default(),
             classification: TaskAiConfig::default(),
             summarization: TaskAiConfig::default(),
@@ -174,6 +178,9 @@ fn default_classify_model() -> String {
 }
 fn default_max_tokens() -> u32 {
     4096
+}
+fn default_pdf_max_tokens() -> u32 {
+    8192
 }
 fn default_date_display_format() -> String {
     "YYYY/MM/DD".to_string()
@@ -240,6 +247,7 @@ pub struct Config {
     pub max_tokens_query: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pub max_tokens_transaction: std::sync::Arc<std::sync::atomic::AtomicU32>,
     pub ai_max_tokens: u32,
+    pub pdf_max_tokens: u32,
 }
 
 impl Default for Config {
@@ -280,6 +288,7 @@ impl Default for Config {
             max_tokens_query: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(16384)),
             max_tokens_transaction: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(16384)),
             ai_max_tokens: 4096,
+            pdf_max_tokens: 8192,
         }
     }
 }
@@ -414,6 +423,7 @@ impl Config {
                 file.finance.max_tokens_transaction.unwrap_or(16384),
             )),
             ai_max_tokens: file.ai.max_tokens,
+            pdf_max_tokens: file.ai.pdf_max_tokens,
         })
     }
 
@@ -880,6 +890,7 @@ git:
         assert_eq!(config.openrouter_api_key, "test_openrouter");
         assert_eq!(config.openai_api_key, "test_openai");
         assert_eq!(config.vault_path, vault_dir);
+        assert_eq!(config.pdf_max_tokens, 8192);
 
         Ok(())
     }

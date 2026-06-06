@@ -26,6 +26,7 @@ pub struct GeminiClient {
     api_key: Option<String>,
     oauth_authenticator: Option<YupAuthenticator>,
     max_tokens: u32,
+    pdf_max_tokens: u32,
 }
 
 impl std::fmt::Debug for GeminiClient {
@@ -45,6 +46,7 @@ impl GeminiClient {
         api_key: Option<String>,
         service_account_path: Option<std::path::PathBuf>,
         max_tokens: u32,
+        pdf_max_tokens: u32,
     ) -> Result<Self, AiError> {
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -118,6 +120,7 @@ impl GeminiClient {
             api_key,
             oauth_authenticator,
             max_tokens,
+            pdf_max_tokens,
         })
     }
 
@@ -557,7 +560,7 @@ impl AiProvider for GeminiClient {
                 "parts": [{ "text": text_content }]
             }],
             "generationConfig": {
-                "maxOutputTokens": self.max_tokens
+                "maxOutputTokens": std::cmp::max(self.max_tokens, 8192)
             }
         });
 
@@ -653,7 +656,7 @@ You are receiving a PDF document. Your tasks are:
 
         let mut generation_config = json!({
             "response_mime_type": "application/json",
-            "maxOutputTokens": self.max_tokens
+            "maxOutputTokens": self.pdf_max_tokens
         });
         if let Some(schema) = gemini_schema {
             generation_config["responseSchema"] = schema;

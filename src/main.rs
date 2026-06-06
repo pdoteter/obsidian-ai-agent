@@ -91,6 +91,7 @@ async fn main() {
         config.gemini_api_key.clone(),
         config.gemini_service_account_key_path.clone(),
         config.ai_max_tokens,
+        config.pdf_max_tokens,
     )
     .await
     {

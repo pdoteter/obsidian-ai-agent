@@ -261,7 +261,7 @@ impl AiProvider for OpenRouterClient {
             video_title,
             raw_transcript,
             &guide_content,
-            self.max_tokens,
+            std::cmp::max(self.max_tokens, 8192),
         );
 
         let response = self.chat_completion(&body).await?;

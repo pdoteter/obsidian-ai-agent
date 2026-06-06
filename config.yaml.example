@@ -30,6 +30,10 @@ ai:
   # - If provider is gemini: use native Google model names (e.g. gemini-1.5-flash)
   classify_model: google/gemini-2.5-flash
 
+  # Token limits (optional)
+  # max_tokens: 4096                       # Default max output tokens for standard requests (default: 4096)
+  # pdf_max_tokens: 8192                   # Default max output tokens for PDF transcription (default: 8192)
+
 # Access control (optional — empty list allows all users)
 access:
   allowed_user_ids: []                    # Comma-separated Telegram user IDs, e.g. [123456, 789012]
