@@ -467,26 +467,6 @@ impl DailyNoteManager {
         Ok(path)
     }
 
-    /// Append content to the end of today's daily note (fallback)
-    #[allow(dead_code)]
-    pub async fn append(&self, content: &str) -> Result<PathBuf, VaultError> {
-        let path = self.ensure_today().await?;
-
-        let mut file = fs::OpenOptions::new().append(true).open(&path).await?;
-
-        use tokio::io::AsyncWriteExt;
-        file.write_all(b"\n").await?;
-        file.write_all(content.as_bytes()).await?;
-        file.write_all(b"\n").await?;
-
-        if let Some(ref tx) = self.update_tx {
-            let _ = tx.send(());
-        }
-
-        info!(path = %path.display(), "Appended to daily note");
-
-        Ok(path)
-    }
 }
 
 /// Insert content after a specific heading in a markdown document.
