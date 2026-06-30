@@ -17,9 +17,6 @@ pub enum ImageError {
     #[error("Image resize failed: {0}")]
     ResizeFailed(String),
 
-    #[allow(dead_code)]
-    #[error("EXIF extraction failed: {0}")]
-    ExifFailed(String),
 
     #[error("Failed to save image: {0}")]
     SaveFailed(String),
