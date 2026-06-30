@@ -301,12 +301,6 @@ impl DailyNoteManager {
         self.daily_notes_dir().join(format!("{}.md", date_str))
     }
 
-    /// Get the path to a daily note for a specific date string (YYYY-MM-DD)
-    #[allow(dead_code)]
-    pub fn path_for_date(&self, date: &str) -> PathBuf {
-        self.daily_notes_dir().join(format!("{}.md", date))
-    }
-
     /// Read the template content from the configured template file.
     /// Returns None if no template is configured or the file can't be read.
     async fn read_template(&self) -> Option<String> {
