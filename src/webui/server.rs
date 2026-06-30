@@ -295,7 +295,9 @@ async fn post_text_message(
             if notifier.is_busy() {
                 let response = TextMessageResponse {
                     category: "command".to_string(),
-                    summary: "⏳ Git operation is already in progress. Please try again in a moment.".to_string(),
+                    summary:
+                        "⏳ Git operation is already in progress. Please try again in a moment."
+                            .to_string(),
                     tags: Vec::new(),
                     ai_success: true,
                 };
@@ -305,7 +307,9 @@ async fn post_text_message(
             let Ok(_git_guard) = notifier.git_lock.try_lock() else {
                 let response = TextMessageResponse {
                     category: "command".to_string(),
-                    summary: "⏳ Git lock is currently held by another operation. Please try again.".to_string(),
+                    summary:
+                        "⏳ Git lock is currently held by another operation. Please try again."
+                            .to_string(),
                     tags: Vec::new(),
                     ai_success: true,
                 };
@@ -330,7 +334,8 @@ async fn post_text_message(
                 Ok(crate::git::sync::SyncResult::Pushed) => {
                     let response = TextMessageResponse {
                         category: "command".to_string(),
-                        summary: "✅ Git sync completed: Local changes pushed to remote.".to_string(),
+                        summary: "✅ Git sync completed: Local changes pushed to remote."
+                            .to_string(),
                         tags: Vec::new(),
                         ai_success: true,
                     };
@@ -339,7 +344,8 @@ async fn post_text_message(
                 Ok(crate::git::sync::SyncResult::PushedWithoutFetch) => {
                     let response = TextMessageResponse {
                         category: "command".to_string(),
-                        summary: "✅ Git sync completed: Pushed without fetch (remote offline).".to_string(),
+                        summary: "✅ Git sync completed: Pushed without fetch (remote offline)."
+                            .to_string(),
                         tags: Vec::new(),
                         ai_success: true,
                     };
@@ -388,7 +394,9 @@ async fn post_text_message(
             if notifier.is_busy() {
                 let response = TextMessageResponse {
                     category: "command".to_string(),
-                    summary: "⏳ Git operation is already in progress. Please try again in a moment.".to_string(),
+                    summary:
+                        "⏳ Git operation is already in progress. Please try again in a moment."
+                            .to_string(),
                     tags: Vec::new(),
                     ai_success: true,
                 };

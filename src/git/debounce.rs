@@ -75,7 +75,10 @@ impl SyncNotifier {
         result
     }
 
-    pub async fn manual_sync(&self, chat_id: teloxide::types::ChatId) -> Result<SyncResult, GitError> {
+    pub async fn manual_sync(
+        &self,
+        chat_id: teloxide::types::ChatId,
+    ) -> Result<SyncResult, GitError> {
         let Ok(_git_guard) = self.git_lock.try_lock() else {
             return Err(GitError::CommandFailed {
                 command: "manual_sync".to_string(),
@@ -133,13 +136,9 @@ impl SyncNotifier {
                 };
 
                 // Ask user for resolution
-                let resolution_result = self.conflict_resolver
-                    .ask_resolution(
-                        chat_id,
-                        &info.files,
-                        ai_analysis,
-                        &diff_preview,
-                    )
+                let resolution_result = self
+                    .conflict_resolver
+                    .ask_resolution(chat_id, &info.files, ai_analysis, &diff_preview)
                     .await;
 
                 match resolution_result {
@@ -150,15 +149,11 @@ impl SyncNotifier {
                         let git = self.git_sync.clone();
                         let resolution_clone = resolution.clone();
                         let exec_result = match resolution_clone {
-                            super::conflict::ConflictResolution::Ours => {
-                                git.resolve_ours().await
-                            }
+                            super::conflict::ConflictResolution::Ours => git.resolve_ours().await,
                             super::conflict::ConflictResolution::Theirs => {
                                 git.resolve_theirs().await
                             }
-                            super::conflict::ConflictResolution::Abort => {
-                                git.resolve_abort().await
-                            }
+                            super::conflict::ConflictResolution::Abort => git.resolve_abort().await,
                         };
 
                         match exec_result {
@@ -188,27 +183,36 @@ impl SyncNotifier {
                                         }
                                     }
                                 } else {
-                                    let _ = self.conflict_resolver.bot.send_message(
-                                        chat_id,
-                                        "❌ Git sync aborted by user."
-                                    ).await;
+                                    let _ = self
+                                        .conflict_resolver
+                                        .bot
+                                        .send_message(chat_id, "❌ Git sync aborted by user.")
+                                        .await;
                                 }
                             }
                             Err(e) => {
                                 error!(error = %e, "Failed to execute conflict resolution");
-                                let _ = self.conflict_resolver.bot.send_message(
-                                    chat_id,
-                                    format!("❌ Failed to execute conflict resolution: {}", e)
-                                ).await;
+                                let _ = self
+                                    .conflict_resolver
+                                    .bot
+                                    .send_message(
+                                        chat_id,
+                                        format!("❌ Failed to execute conflict resolution: {}", e),
+                                    )
+                                    .await;
                             }
                         }
                     }
                     Err(e) => {
                         error!(error = %e, "Failed to get conflict resolution from user");
-                        let _ = self.conflict_resolver.bot.send_message(
-                            chat_id,
-                            format!("❌ Failed to get conflict resolution: {}", e)
-                        ).await;
+                        let _ = self
+                            .conflict_resolver
+                            .bot
+                            .send_message(
+                                chat_id,
+                                format!("❌ Failed to get conflict resolution: {}", e),
+                            )
+                            .await;
                     }
                 }
 
