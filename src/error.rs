@@ -140,9 +140,6 @@ pub enum AppError {
     Url(#[from] UrlError),
 }
 
-/// Convenience type alias
-#[allow(dead_code)]
-pub type AppResult<T> = Result<T, AppError>;
 
 #[cfg(test)]
 mod tests {
