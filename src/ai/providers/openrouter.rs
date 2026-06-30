@@ -303,3 +303,27 @@ impl AiProvider for OpenRouterClient {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_openrouter_new_success() -> Result<(), String> {
+        let api_key = "test_key".to_string();
+        let max_tokens = 1000;
+
+        let client = OpenRouterClient::new(api_key.clone(), max_tokens)
+            .map_err(|e| format!("Failed to initialize client: {}", e))?;
+
+        if client.api_key != api_key {
+            return Err(format!("Expected api_key to be {}, got {}", api_key, client.api_key));
+        }
+
+        if client.max_tokens != max_tokens {
+            return Err(format!("Expected max_tokens to be {}, got {}", max_tokens, client.max_tokens));
+        }
+
+        Ok(())
+    }
+}
