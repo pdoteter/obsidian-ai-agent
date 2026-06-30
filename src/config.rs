@@ -1162,16 +1162,52 @@ git:
     #[test]
     fn test_config_atomic_tokens() {
         let config = Config::default();
-        assert_eq!(config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst), 8192);
-        assert_eq!(config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst), 16384);
-        assert_eq!(config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst), 16384);
+        assert_eq!(
+            config
+                .max_tokens_classify
+                .load(std::sync::atomic::Ordering::SeqCst),
+            8192
+        );
+        assert_eq!(
+            config
+                .max_tokens_query
+                .load(std::sync::atomic::Ordering::SeqCst),
+            16384
+        );
+        assert_eq!(
+            config
+                .max_tokens_transaction
+                .load(std::sync::atomic::Ordering::SeqCst),
+            16384
+        );
 
-        config.max_tokens_classify.store(4000, std::sync::atomic::Ordering::SeqCst);
-        config.max_tokens_query.store(5000, std::sync::atomic::Ordering::SeqCst);
-        config.max_tokens_transaction.store(6000, std::sync::atomic::Ordering::SeqCst);
+        config
+            .max_tokens_classify
+            .store(4000, std::sync::atomic::Ordering::SeqCst);
+        config
+            .max_tokens_query
+            .store(5000, std::sync::atomic::Ordering::SeqCst);
+        config
+            .max_tokens_transaction
+            .store(6000, std::sync::atomic::Ordering::SeqCst);
 
-        assert_eq!(config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst), 4000);
-        assert_eq!(config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst), 5000);
-        assert_eq!(config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst), 6000);
+        assert_eq!(
+            config
+                .max_tokens_classify
+                .load(std::sync::atomic::Ordering::SeqCst),
+            4000
+        );
+        assert_eq!(
+            config
+                .max_tokens_query
+                .load(std::sync::atomic::Ordering::SeqCst),
+            5000
+        );
+        assert_eq!(
+            config
+                .max_tokens_transaction
+                .load(std::sync::atomic::Ordering::SeqCst),
+            6000
+        );
     }
 }

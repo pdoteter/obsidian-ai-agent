@@ -888,6 +888,14 @@ fn get_message_source(msg: &Message) -> Option<String> {
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn test_schema() {
+        // The schema function should successfully instantiate and return an UpdateHandler
+        let handler = schema();
+        // Verify it was created successfully
+        drop(handler);
+    }
     #[test]
     fn test_clean_json_response() {
         let raw = "```json\n{\n  \"type\": \"transaction\"\n}\n```";

@@ -63,13 +63,14 @@ async fn main() {
     let mut providers: HashMap<String, Arc<dyn AiProvider>> = HashMap::new();
 
     // OpenRouter Provider
-    let openrouter = match OpenRouterClient::new(config.openrouter_api_key.clone(), config.ai_max_tokens) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            error!(error = %e, "Failed to create OpenRouter client");
-            std::process::exit(1);
-        }
-    };
+    let openrouter =
+        match OpenRouterClient::new(config.openrouter_api_key.clone(), config.ai_max_tokens) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                error!(error = %e, "Failed to create OpenRouter client");
+                std::process::exit(1);
+            }
+        };
     providers.insert("openrouter".to_string(), openrouter.clone());
 
     // OpenAI Whisper Provider

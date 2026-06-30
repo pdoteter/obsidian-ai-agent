@@ -76,12 +76,18 @@ pub async fn handle_text_message(
                     }
                     Ok(crate::git::sync::SyncResult::Pushed) => {
                         let _ = bot_clone
-                            .send_message(chat_id, "✅ Git sync completed: Local changes pushed to remote.")
+                            .send_message(
+                                chat_id,
+                                "✅ Git sync completed: Local changes pushed to remote.",
+                            )
                             .await;
                     }
                     Ok(crate::git::sync::SyncResult::PushedWithoutFetch) => {
                         let _ = bot_clone
-                            .send_message(chat_id, "✅ Git sync completed: Pushed without fetch (remote offline).")
+                            .send_message(
+                                chat_id,
+                                "✅ Git sync completed: Pushed without fetch (remote offline).",
+                            )
                             .await;
                     }
                     Ok(crate::git::sync::SyncResult::RebasedAndPushed) => {
@@ -157,9 +163,15 @@ pub async fn handle_text_message(
         }
         return Ok(());
     } else if text == "/finance_tokens" {
-        let classify = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
-        let query = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
-        let transaction = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+        let classify = config
+            .max_tokens_classify
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let query = config
+            .max_tokens_query
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let transaction = config
+            .max_tokens_transaction
+            .load(std::sync::atomic::Ordering::SeqCst);
         let reply = format!(
             "<b>📊 Current Finance Bot max_tokens limits:</b>\n\
              • Classify: <code>{}</code>\n\

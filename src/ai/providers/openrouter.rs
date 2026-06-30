@@ -30,7 +30,11 @@ impl OpenRouterClient {
             .pool_max_idle_per_host(5)
             .build()?;
 
-        Ok(Self { http, api_key, max_tokens })
+        Ok(Self {
+            http,
+            api_key,
+            max_tokens,
+        })
     }
 
     /// Make a chat completion request with automatic retry on rate limits and server errors
@@ -115,9 +119,7 @@ impl OpenRouterClient {
         // Check finish_reason — 'length' means the output was truncated due to max_tokens
         if let Some(finish_reason) = choice["finish_reason"].as_str() {
             if finish_reason == "length" {
-                let partial_text = choice["message"]["content"]
-                    .as_str()
-                    .unwrap_or("");
+                let partial_text = choice["message"]["content"].as_str().unwrap_or("");
                 return Err(AiError::ParseError(format!(
                     "Response was truncated (finish_reason=length). \
                      Increase max_tokens. Partial output: {}",
@@ -161,7 +163,12 @@ impl AiProvider for OpenRouterClient {
             crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT,
             guide,
         );
-        let body = crate::ai::classify::build_text_request_body(text, model, &system_prompt, self.max_tokens);
+        let body = crate::ai::classify::build_text_request_body(
+            text,
+            model,
+            &system_prompt,
+            self.max_tokens,
+        );
 
         let response = self.chat_completion(&body).await?;
         let content = Self::extract_content(&response)?;
