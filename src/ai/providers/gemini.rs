@@ -243,14 +243,12 @@ impl GeminiClient {
     /// Extract generated text response from Gemini generateContent JSON response
     fn extract_content(response: &Value) -> Result<String, AiError> {
         // Gemini response structure path: candidates[0].content.parts[0].text
-        let candidate = response["candidates"]
-            .get(0)
-            .ok_or_else(|| {
-                AiError::ParseError(format!(
-                    "No candidates in Gemini response. Raw response: {:?}",
-                    response
-                ))
-            })?;
+        let candidate = response["candidates"].get(0).ok_or_else(|| {
+            AiError::ParseError(format!(
+                "No candidates in Gemini response. Raw response: {:?}",
+                response
+            ))
+        })?;
 
         // Check finishReason — if MAX_TOKENS, the output was truncated
         if let Some(finish_reason) = candidate["finishReason"].as_str() {
@@ -321,13 +319,13 @@ fn convert_to_gemini_schema(mut schema: Value) -> Value {
         if let Some(properties) = obj.get_mut("properties") {
             if let Some(prop_obj) = properties.as_object_mut() {
                 for (_, prop_val) in prop_obj.iter_mut() {
-                    *prop_val = convert_to_gemini_schema(prop_val.clone());
+                    *prop_val = convert_to_gemini_schema(prop_val.take());
                 }
             }
         }
 
         if let Some(items) = obj.get_mut("items") {
-            *items = convert_to_gemini_schema(items.clone());
+            *items = convert_to_gemini_schema(items.take());
         }
     }
     schema
@@ -785,8 +783,16 @@ mod tests {
         let result = GeminiClient::extract_content(&response);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("truncated"), "Error should mention truncation: {}", err);
-        assert!(err.contains("MAX_TOKENS"), "Error should mention MAX_TOKENS: {}", err);
+        assert!(
+            err.contains("truncated"),
+            "Error should mention truncation: {}",
+            err
+        );
+        assert!(
+            err.contains("MAX_TOKENS"),
+            "Error should mention MAX_TOKENS: {}",
+            err
+        );
     }
 
     #[test]

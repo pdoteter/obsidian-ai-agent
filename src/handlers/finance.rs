@@ -315,9 +315,15 @@ async fn handle_text_inner(
             .await?;
         return Ok(());
     } else if text == "/finance_tokens" {
-        let classify = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
-        let query = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
-        let transaction = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+        let classify = config
+            .max_tokens_classify
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let query = config
+            .max_tokens_query
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let transaction = config
+            .max_tokens_transaction
+            .load(std::sync::atomic::Ordering::SeqCst);
         let reply = format!(
             "<b>📊 Current Finance Bot max_tokens limits:</b>\n\
              • Classify: <code>{}</code>\n\
@@ -539,9 +545,15 @@ Do not include any explanation or markdown formatting in your response. Return r
         },
     ];
 
-    let max_tokens = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_classify
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -697,9 +709,15 @@ Please update the note and return the JSON object."#
         },
     ];
 
-    let max_tokens = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_transaction
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -802,9 +820,15 @@ Please answer."#
         },
     ];
 
-    let max_tokens = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_query
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     Ok(response)
