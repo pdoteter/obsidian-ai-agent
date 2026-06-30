@@ -284,10 +284,17 @@ mod tests {
                 name: "p2".to_string(),
             }),
         );
+        providers.insert(
+            "p3".to_string(),
+            Arc::new(MockProvider {
+                name: "p3".to_string(),
+            }),
+        );
 
         let mut config = Config::default();
         config.ai_provider = "p1".to_string();
         config.transcription.provider = Some("p2".to_string());
+        config.summarization.provider = Some("p3".to_string());
 
         let service = AiService::new(providers, &config);
 
@@ -298,6 +305,16 @@ mod tests {
         // Transcription should go to p2 (override)
         let res = service.transcribe(&[]).await.unwrap();
         assert_eq!(res, "transcribed by p2");
+
+        // Summarization should go to p3 (override)
+        let page = PageContent {
+            title: None,
+            description: None,
+            body_text: String::new(),
+            url: String::new(),
+        };
+        let res = service.summarize_url(&page, None, "m", None).await.unwrap();
+        assert_eq!(res.title, "summary by p3");
     }
 
     #[tokio::test]
