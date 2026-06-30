@@ -617,4 +617,41 @@ mod tests {
         assert!(truncated.contains("...[truncated"));
         assert!(truncated.contains("200 total bytes"));
     }
+
+    #[test]
+    fn test_parse_classification_with_fallback_valid_json() {
+        let content = r#"{"category": "todo", "markdown": "- [ ] Buy milk", "tags": ["shopping"], "summary": "Buy milk", "frontmatter": null}"#;
+        let result = super::parse_classification_with_fallback(content);
+        assert!(result.is_ok());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Todo);
+        assert_eq!(note.markdown, "- [ ] Buy milk");
+        assert_eq!(note.tags, vec!["shopping"]);
+        assert_eq!(note.summary, "Buy milk");
+    }
+
+    #[test]
+    fn test_parse_classification_with_fallback_invalid_json_with_extractable_parts() {
+        let content = r#"{"category": "log", "markdown": "- Went for a run", "tags": ["health", "fitness"], "summary":"#;
+        let result = super::parse_classification_with_fallback(content);
+        assert!(result.is_ok());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Log);
+        assert_eq!(note.markdown, "- Went for a run");
+        assert_eq!(note.tags, vec!["health", "fitness"]);
+        assert_eq!(note.summary, "Extracted from partial response");
+    }
+
+    #[test]
+    fn test_parse_classification_with_fallback_completely_invalid_json() {
+        let content = r#"this is not json"#;
+        let result = super::parse_classification_with_fallback(content);
+        assert!(result.is_err());
+        match result {
+            Err(crate::error::AiError::ClassificationFailed(msg)) => {
+                assert!(msg.contains("Failed to parse classification JSON"));
+            }
+            _ => panic!("Expected ClassificationFailed error"),
+        }
+    }
 }
