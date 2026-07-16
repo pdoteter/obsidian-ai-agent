@@ -187,10 +187,7 @@ impl AiProvider for OpenRouterClient {
     ) -> Result<ClassifiedNote, AiError> {
         info!(model = model, "Classifying image via OpenRouter");
 
-        let base_prompt = format!(
-            "{}\n\nYou are also receiving an image. Describe what you see and classify it. If a caption is provided, use it as primary context. Include the image description in the markdown output as a short paragraph.",
-            crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT
-        );
+        let base_prompt = crate::ai::classify::build_image_system_prompt();
         let system_prompt = crate::ai::guide::compose_system_prompt(&base_prompt, guide);
 
         let body = crate::ai::classify::build_image_request_body(

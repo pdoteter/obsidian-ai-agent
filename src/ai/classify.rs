@@ -340,6 +340,22 @@ pub const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge m
 - For logs, do NOT include time — timestamps are added automatically by the system
 "#;
 
+/// Build the system prompt used for image classification, adding OCR and Dutch translation instructions.
+pub fn build_image_system_prompt() -> String {
+    format!(
+        "{}\n\nYou are also receiving an image. Describe what you see and classify it. If a caption is provided, use it as primary context. Include the image description in the markdown output as a short paragraph.\n\n\
+        Additionally, if the image contains any visible text (such as in documents, screenshots, signs, pages, labels, etc.):\n\
+        1. Extract all readable text from the image (OCR).\n\
+        2. Identify the original language of the extracted text.\n\
+        3. Translate the extracted text to Dutch (Nederlands).\n\
+        4. Include a dedicated section in the markdown field showing:\n\
+           - **Gescande tekst (Origineel - [Taal])**: The original extracted text\n\
+           - **Vertaling (Nederlands)**: The Dutch translation of the extracted text.",
+        CLASSIFICATION_SYSTEM_PROMPT
+    )
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,4 +670,13 @@ mod tests {
             _ => panic!("Expected ClassificationFailed error"),
         }
     }
+
+    #[test]
+    fn test_build_image_system_prompt() {
+        let prompt = super::build_image_system_prompt();
+        assert!(prompt.contains("You are a personal knowledge management assistant."));
+        assert!(prompt.contains("Extract all readable text from the image (OCR)."));
+        assert!(prompt.contains("Translate the extracted text to Dutch (Nederlands)."));
+    }
 }
+
