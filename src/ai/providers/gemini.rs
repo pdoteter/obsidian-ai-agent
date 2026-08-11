@@ -354,7 +354,7 @@ impl AiProvider for GeminiClient {
         );
 
         let system_prompt = crate::ai::guide::compose_system_prompt(
-            crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT,
+            &crate::ai::classify::get_classification_system_prompt(),
             guide,
         );
 
@@ -634,7 +634,8 @@ You are receiving a PDF document. Your tasks are:
   \"category\": \"note\",
   \"summary\": \"Concise 1-3 sentence summary of the document\",
   \"markdown\": \"The full and detailed transcription of the document in markdown format\",
-  \"tags\": [\"tag1\", \"tag2\"]
+  \"tags\": [\"tag1\", \"tag2\"],
+  \"date\": null
 }";
 
         let text_content = if let Some(p) = user_prompt {

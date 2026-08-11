@@ -208,6 +208,7 @@ mod tests {
                 markdown: String::new(),
                 tags: Vec::new(),
                 frontmatter: None,
+                date: None,
             })
         }
         async fn classify_image(
@@ -224,6 +225,7 @@ mod tests {
                 markdown: String::new(),
                 tags: Vec::new(),
                 frontmatter: None,
+                date: None,
             })
         }
         async fn summarize_url(
@@ -265,6 +267,7 @@ mod tests {
                 markdown: format!("pdf transcription by {}", self.name),
                 tags: vec!["mock".to_string()],
                 frontmatter: None,
+                date: None,
             })
         }
     }

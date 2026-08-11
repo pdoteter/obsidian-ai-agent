@@ -292,13 +292,16 @@ pub async fn process_text_entry(
     {
         Ok(c) => {
             // Format and write to vault
+            let parsed_date = c.date.as_deref().and_then(|d| {
+                chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+            });
             let (section, content) = writer::format_for_daily_note(&c);
-            vault.append_to_section(section, &content).await?;
+            vault.append_to_section_for_date(section, &content, parsed_date).await?;
 
             // Update frontmatter if AI provided any
             if let Some(ref frontmatter) = c.frontmatter {
                 if !frontmatter.is_empty() {
-                    vault.update_frontmatter(frontmatter).await?;
+                    vault.update_frontmatter_for_date(frontmatter, parsed_date).await?;
                 }
             }
 
@@ -326,6 +329,7 @@ pub async fn process_text_entry(
                     tags: Vec::new(),
                     summary: text.to_string(),
                     frontmatter: None,
+                    date: None,
                 },
                 false,
             ))
@@ -430,6 +434,7 @@ mod tests {
             tags: vec!["health".to_string()],
             summary: "Weight logged".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         assert_eq!(build_confirmation_message(&classified), "👍");
@@ -443,6 +448,7 @@ mod tests {
             tags: vec!["shopping".to_string(), "home".to_string()],
             summary: "Buy milk".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         assert_eq!(

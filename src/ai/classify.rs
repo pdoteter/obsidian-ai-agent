@@ -42,6 +42,9 @@ pub struct ClassifiedNote {
     /// Optional key-value pairs for daily note frontmatter updates
     #[serde(default)]
     pub frontmatter: Option<HashMap<String, serde_json::Value>>,
+    /// Optional target date for the note (YYYY-MM-DD)
+    #[serde(default)]
+    pub date: Option<String>,
 }
 
 /// Robust classification parsing with fallback for truncated responses
@@ -106,6 +109,7 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
     static SUMMARY_RE: OnceLock<Regex> = OnceLock::new();
     static TAGS_RE: OnceLock<Regex> = OnceLock::new();
     static TAG_ITEM_RE: OnceLock<Regex> = OnceLock::new();
+    static DATE_RE: OnceLock<Regex> = OnceLock::new();
 
     // Try to extract category (required)
     let category_re = CATEGORY_RE.get_or_init(|| {
@@ -160,12 +164,22 @@ fn try_extract_partial_classification(content: &str) -> Option<ClassifiedNote> {
         })
         .unwrap_or_default();
 
+    // Try to extract date (optional)
+    let date_re = DATE_RE.get_or_init(|| {
+        Regex::new(r#""date"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)""#).expect("Invalid date regex")
+    });
+    let date = date_re
+        .captures(content)
+        .and_then(|c| c.get(1))
+        .map(|m| unescape_json_string(m.as_str()));
+
     Some(ClassifiedNote {
         category,
         markdown,
         tags,
         summary,
         frontmatter: None, // Cannot reliably extract complex nested structure
+        date,
     })
 }
 
@@ -222,9 +236,13 @@ pub fn classified_note_response_format() -> serde_json::Value {
                         "type": ["object", "null"],
                         "description": "Optional frontmatter key-value pairs to add/update in the daily note YAML frontmatter. Use for structured data like weight, measurements, etc. Return null if no frontmatter updates needed.",
                         "additionalProperties": true
+                    },
+                    "date": {
+                        "type": ["string", "null"],
+                        "description": "Optional target date in YYYY-MM-DD format if the note/task refers to a day other than today (e.g. yesterday, 2026-08-10, two days ago, etc.). If it refers to today, or no specific day is mentioned, set this to null."
                     }
                 },
-                "required": ["category", "markdown", "tags", "summary", "frontmatter"],
+                "required": ["category", "markdown", "tags", "summary", "frontmatter", "date"],
                 "additionalProperties": false
             }
         }
@@ -312,6 +330,19 @@ pub fn slug_from_summary(summary: &str) -> String {
     }
 }
 
+pub fn get_classification_system_prompt() -> String {
+    let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    format!(
+        "{}\n\n\
+        ## Date Awareness Rules:\n\
+        - Today's date is: {}.\n\
+        - If the message refers to a specific target date that is NOT today (e.g. \"yesterday\", \"last Thursday\", \"on 2026-08-05\", \"2 days ago\"), determine the target date in YYYY-MM-DD format and set it in the \"date\" field.\n\
+        - If it refers to today (e.g. \"today\", \"today I did...\") or if no specific target date/relative date is mentioned, set \"date\" to null.",
+        CLASSIFICATION_SYSTEM_PROMPT,
+        current_date
+    )
+}
+
 pub const CLASSIFICATION_SYSTEM_PROMPT: &str = r#"You are a personal knowledge management assistant. Your job is to classify incoming text messages and format them as markdown for an Obsidian daily note.
 
 ## Classification Rules:
@@ -351,7 +382,7 @@ pub fn build_image_system_prompt() -> String {
         4. Include a dedicated section in the markdown field showing:\n\
            - **Gescande tekst (Origineel - [Taal])**: The original extracted text\n\
            - **Vertaling (Nederlands)**: The Dutch translation of the extracted text.",
-        CLASSIFICATION_SYSTEM_PROMPT
+        get_classification_system_prompt()
     )
 }
 
@@ -678,5 +709,37 @@ mod tests {
         assert!(prompt.contains("Extract all readable text from the image (OCR)."));
         assert!(prompt.contains("Translate the extracted text to Dutch (Nederlands)."));
     }
-}
 
+    #[test]
+    fn test_classified_note_deserialize_with_date() {
+        let value = json!({
+            "category": "note",
+            "markdown": "test",
+            "tags": [],
+            "summary": "test",
+            "frontmatter": null,
+            "date": "2026-08-10"
+        });
+
+        let note: ClassifiedNote = serde_json::from_value(value).expect("should deserialize");
+        assert_eq!(note.date, Some("2026-08-10".to_string()));
+    }
+
+    #[test]
+    fn test_try_extract_partial_classification_with_date() {
+        let content = r#"{"category": "todo", "markdown": "- [ ] Buy milk", "tags": [], "summary": "Buy milk", "date": "2026-08-10"}"#;
+        let result = try_extract_partial_classification(content);
+        assert!(result.is_some());
+        let note = result.unwrap();
+        assert_eq!(note.category, NoteCategory::Todo);
+        assert_eq!(note.date, Some("2026-08-10".to_string()));
+    }
+
+    #[test]
+    fn test_get_classification_system_prompt_contains_today() {
+        let prompt = get_classification_system_prompt();
+        let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert!(prompt.contains(&current_date));
+        assert!(prompt.contains("Date Awareness Rules"));
+    }
+}

@@ -333,12 +333,13 @@ impl DailyNoteManager {
         }
     }
 
-    /// Ensure today's daily note exists. Creates it from template if not.
+    /// Ensure daily note for specific date exists. Creates it from template if not.
     /// Returns the path to the daily note.
-    pub async fn ensure_today(&self) -> Result<PathBuf, VaultError> {
+    pub async fn ensure_date(&self, date: &chrono::NaiveDate) -> Result<PathBuf, VaultError> {
         self.sync_before_write_if_idle().await;
 
-        let path = self.today_path();
+        let date_str = self.format_date(date);
+        let path = self.daily_notes_dir().join(format!("{}.md", date_str));
 
         // Ensure the full parent directory for today's note exists.
         // The configured date format can include path separators like YYYY/MM/YYYY-MM-DD,
@@ -352,8 +353,6 @@ impl DailyNoteManager {
 
         // Create file from template if it doesn't exist
         if !path.exists() {
-            let today = Local::now().date_naive();
-
             // Try configured template, fall back to built-in
             let template = self
                 .read_template()
@@ -362,7 +361,7 @@ impl DailyNoteManager {
 
             // Replace Obsidian template variables
             // {{date}} uses the configured date_display_format, not the file-path format
-            let display_date = today.format(&self.date_display_format).to_string();
+            let display_date = date.format(&self.date_display_format).to_string();
             let content = template
                 .replace("{{date}}", &display_date)
                 .replace("{{time}}", &Local::now().format("%H:%M").to_string())
@@ -375,14 +374,24 @@ impl DailyNoteManager {
         Ok(path)
     }
 
-    /// Append content to a specific section in the daily note.
+    /// Ensure today's daily note exists. Creates it from template if not.
+    /// Returns the path to the daily note.
+    pub async fn ensure_today(&self) -> Result<PathBuf, VaultError> {
+        self.ensure_date(&Local::now().date_naive()).await
+    }
+
+    /// Append content to a specific section in the daily note for a target date.
     /// Sections are identified by their heading (e.g., "## 📝 Notes").
-    pub async fn append_to_section(
+    pub async fn append_to_section_for_date(
         &self,
         section_heading: &str,
         content: &str,
+        date: Option<chrono::NaiveDate>,
     ) -> Result<PathBuf, VaultError> {
-        let path = self.ensure_today().await?;
+        let path = match date {
+            Some(d) => self.ensure_date(&d).await?,
+            None => self.ensure_today().await?,
+        };
 
         let file_content = fs::read_to_string(&path).await?;
 
@@ -404,14 +413,28 @@ impl DailyNoteManager {
         Ok(path)
     }
 
-    /// Replace an existing entry in a specific section by matching URL.
-    pub async fn replace_entry_by_url(
+    /// Append content to a specific section in today's daily note.
+    /// Sections are identified by their heading (e.g., "## 📝 Notes").
+    pub async fn append_to_section(
+        &self,
+        section_heading: &str,
+        content: &str,
+    ) -> Result<PathBuf, VaultError> {
+        self.append_to_section_for_date(section_heading, content, None).await
+    }
+
+    /// Replace an existing entry in a specific section by matching URL in the daily note for a target date.
+    pub async fn replace_entry_by_url_for_date(
         &self,
         section_heading: &str,
         url: &str,
         new_content: &str,
+        date: Option<chrono::NaiveDate>,
     ) -> Result<PathBuf, VaultError> {
-        let path = self.ensure_today().await?;
+        let path = match date {
+            Some(d) => self.ensure_date(&d).await?,
+            None => self.ensure_today().await?,
+        };
 
         let file_content = fs::read_to_string(&path).await?;
 
@@ -435,12 +458,26 @@ impl DailyNoteManager {
         Ok(path)
     }
 
-    /// Update frontmatter fields in today's daily note
-    pub async fn update_frontmatter(
+    /// Replace an existing entry in a specific section by matching URL.
+    pub async fn replace_entry_by_url(
+        &self,
+        section_heading: &str,
+        url: &str,
+        new_content: &str,
+    ) -> Result<PathBuf, VaultError> {
+        self.replace_entry_by_url_for_date(section_heading, url, new_content, None).await
+    }
+
+    /// Update frontmatter fields in target date's daily note
+    pub async fn update_frontmatter_for_date(
         &self,
         fields: &std::collections::HashMap<String, serde_json::Value>,
+        date: Option<chrono::NaiveDate>,
     ) -> Result<PathBuf, VaultError> {
-        let path = self.ensure_today().await?;
+        let path = match date {
+            Some(d) => self.ensure_date(&d).await?,
+            None => self.ensure_today().await?,
+        };
 
         let file_content = fs::read_to_string(&path).await?;
 
@@ -461,6 +498,13 @@ impl DailyNoteManager {
         Ok(path)
     }
 
+    /// Update frontmatter fields in today's daily note
+    pub async fn update_frontmatter(
+        &self,
+        fields: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<PathBuf, VaultError> {
+        self.update_frontmatter_for_date(fields, None).await
+    }
 }
 
 /// Insert content after a specific heading in a markdown document.
@@ -948,5 +992,45 @@ mod tests {
             .join("Daily Notes")
             .join(Local::now().format("%Y/%m/%Y-%m-%d.md").to_string());
         assert_eq!(note_path, expected_path);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_date_creates_note_in_past() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings::default(),
+            date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
+            update_tx: None,
+        };
+
+        let target_date = chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let note_path = manager.ensure_date(&target_date).await.unwrap();
+
+        assert!(note_path.exists());
+        assert_eq!(note_path.file_name().unwrap().to_str().unwrap(), "2026-08-10.md");
+    }
+
+    #[tokio::test]
+    async fn test_append_to_section_for_date() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault_path = temp_dir.path().to_path_buf();
+
+        let manager = DailyNoteManager {
+            vault_path: vault_path.clone(),
+            settings: DailyNoteSettings::default(),
+            date_display_format: "%Y-%m-%d".to_string(),
+            sync_notifier: None,
+            update_tx: None,
+        };
+
+        let target_date = chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
+        let path = manager.append_to_section_for_date("## 📝 Notes", "- Hairdresser", Some(target_date)).await.unwrap();
+
+        let content = fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("- Hairdresser"));
     }
 }

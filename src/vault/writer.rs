@@ -18,10 +18,19 @@ pub fn format_for_daily_note(note: &ClassifiedNote) -> (&'static str, String) {
             ("## ✅ Todos", content)
         }
         NoteCategory::Log => {
-            let time = Local::now().format("%H:%M").to_string();
-            // Strip leading "- " from AI markdown to rebuild with timestamp
+            let today = Local::now().format("%Y-%m-%d").to_string();
+            let include_time = match &note.date {
+                Some(d) => d == &today,
+                None => true,
+            };
+
             let entry_text = note.markdown.trim_start_matches("- ").trim();
-            let content = format!("- {} — {}{}", time, entry_text, tags_str);
+            let content = if include_time {
+                let time = Local::now().format("%H:%M").to_string();
+                format!("- {} — {}{}", time, entry_text, tags_str)
+            } else {
+                format!("- {}{}", entry_text, tags_str)
+            };
             ("## 📋 Log", content)
         }
         NoteCategory::Note => {
@@ -134,6 +143,7 @@ mod tests {
             tags: vec!["shopping".to_string()],
             summary: "Buy groceries".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -150,6 +160,7 @@ mod tests {
             tags: vec!["work".to_string()],
             summary: "Team meeting".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -168,6 +179,7 @@ mod tests {
             tags: vec![],
             summary: "Running".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -190,6 +202,23 @@ mod tests {
             "Should have HH:MM format, got: {}",
             after_dash
         );
+    }
+
+    #[test]
+    fn test_format_log_past_date_no_timestamp() {
+        let note = ClassifiedNote {
+            category: NoteCategory::Log,
+            markdown: "- Hairdresser visit".to_string(),
+            tags: vec![],
+            summary: "hairdresser".to_string(),
+            frontmatter: None,
+            date: Some("2026-08-10".to_string()),
+        };
+
+        let (section, content) = format_for_daily_note(&note);
+        assert_eq!(section, "## 📋 Log");
+        // Should not have a timestamp, should just be "- Hairdresser visit"
+        assert_eq!(content, "- Hairdresser visit");
     }
 
     #[test]
@@ -386,6 +415,7 @@ mod tests {
             tags: vec!["rust".to_string()],
             summary: "Rust thought".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -401,6 +431,7 @@ mod tests {
             tags: vec!["tag1".to_string(), "tag2".to_string()],
             summary: "test".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (section, content) = format_for_daily_note(&note);
@@ -416,6 +447,7 @@ mod tests {
             tags: vec![],
             summary: "dash test".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (_section, content) = format_for_daily_note(&note);
@@ -440,6 +472,7 @@ mod tests {
             tags: vec![],
             summary: "no tags".to_string(),
             frontmatter: None,
+            date: None,
         };
 
         let (_section, content) = format_for_daily_note(&note);

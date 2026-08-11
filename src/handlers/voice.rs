@@ -151,15 +151,19 @@ pub async fn process_voice_entry(
                     tags: Vec::new(),
                     summary: transcript,
                     frontmatter: None,
+                    date: None,
                 },
             ));
         }
     };
 
     // Format and write to vault
+    let parsed_date = classified.date.as_deref().and_then(|d| {
+        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+    });
     let (section, content) = writer::format_for_daily_note(&classified);
     vault
-        .append_to_section(section, &content)
+        .append_to_section_for_date(section, &content, parsed_date)
         .await
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
@@ -167,7 +171,7 @@ pub async fn process_voice_entry(
     if let Some(ref frontmatter) = classified.frontmatter {
         if !frontmatter.is_empty() {
             vault
-                .update_frontmatter(frontmatter)
+                .update_frontmatter_for_date(frontmatter, parsed_date)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         }

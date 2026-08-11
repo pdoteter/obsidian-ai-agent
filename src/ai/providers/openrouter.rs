@@ -160,7 +160,7 @@ impl AiProvider for OpenRouterClient {
 
         // I'll re-implement the logic here, pulling from classify.rs
         let system_prompt = crate::ai::guide::compose_system_prompt(
-            crate::ai::classify::CLASSIFICATION_SYSTEM_PROMPT,
+            &crate::ai::classify::get_classification_system_prompt(),
             guide,
         );
         let body = crate::ai::classify::build_text_request_body(

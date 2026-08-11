@@ -132,16 +132,6 @@ pub async fn process_pdf_entry(
 ) -> Result<(String, String, String, String, bool), Box<dyn std::error::Error + Send + Sync>> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    // Ensure daily note exists and resolve its parent directory
-    let note_path = vault.ensure_today().await.map_err(|e| {
-        error!(error = %e, "Failed to ensure today's daily note before saving PDF");
-        e
-    })?;
-
-    let note_dir = note_path
-        .parent()
-        .ok_or("Daily note has no parent directory")?;
-
     // Try Gemini Multimodal transcription first
     let gemini_model = &config.openrouter_model_classify; // Gemini or configured model
     let mut classified_res: Option<ClassifiedNote> = None;
@@ -161,6 +151,28 @@ pub async fn process_pdf_entry(
         }
     }
 
+    // Parse target date from classification if present
+    let parsed_date = if let Some(ref note) = classified_res {
+        note.date.as_deref().and_then(|d| {
+            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
+        })
+    } else {
+        None
+    };
+
+    // Ensure daily note exists and resolve its parent directory
+    let note_path = match parsed_date {
+        Some(d) => vault.ensure_date(&d).await,
+        None => vault.ensure_today().await,
+    }.map_err(|e| {
+        error!(error = %e, "Failed to ensure target daily note before saving PDF");
+        e
+    })?;
+
+    let note_dir = note_path
+        .parent()
+        .ok_or("Daily note has no parent directory")?;
+
     // Determine filenames, titles and summary
     let (pdf_filename, transcript_filename, title, summary, content_markdown) = if gemini_success {
         let note = classified_res.as_ref().unwrap();
@@ -176,8 +188,9 @@ pub async fn process_pdf_entry(
             slug
         };
 
-        let pdf_name = generate_filename(&today, &slug_final, "pdf");
-        let trans_name = generate_filename(&today, &slug_final, "md");
+        let date_prefix = note.date.clone().unwrap_or_else(|| today.clone());
+        let pdf_name = generate_filename(&date_prefix, &slug_final, "pdf");
+        let trans_name = generate_filename(&date_prefix, &slug_final, "md");
 
         (
             pdf_name,
@@ -265,7 +278,7 @@ pub async fn process_pdf_entry(
 
     // 4. Append to Vault Log section
     vault
-        .append_to_section("## 📋 Log", &log_content)
+        .append_to_section_for_date("## 📋 Log", &log_content, parsed_date)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to append PDF entry to daily note");
@@ -276,7 +289,7 @@ pub async fn process_pdf_entry(
     if let Some(ref note) = classified_res {
         if let Some(ref frontmatter) = note.frontmatter {
             if !frontmatter.is_empty() {
-                let _ = vault.update_frontmatter(frontmatter).await.map_err(|e| {
+                let _ = vault.update_frontmatter_for_date(frontmatter, parsed_date).await.map_err(|e| {
                     error!(error = %e, "Failed to update frontmatter from PDF transcription");
                     e
                 });
