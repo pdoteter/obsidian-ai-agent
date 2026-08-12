@@ -135,24 +135,14 @@ pub async fn process_photo_entry(
         )
         .await;
 
-    // Parse target date from classification if present
-    let parsed_date = if let Ok(ref c) = classified {
-        c.date.as_deref().and_then(|d| {
-            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-        })
-    } else {
-        None
-    };
-
-    // 10. Generate filename (with fallback on AI failure)
+    // 10. Generate filename (with fallback on AI failure, always current day)
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
     let (filename, summary) = match &classified {
         Ok(c) => {
             let slug = crate::ai::classify::slug_from_summary(&c.summary);
-            let date_prefix = c.date.clone().unwrap_or_else(|| today.clone());
             (
-                crate::image::process::generate_filename(&date_prefix, &slug),
+                crate::image::process::generate_filename(&today, &slug),
                 c.summary.clone(),
             )
         }
@@ -165,11 +155,8 @@ pub async fn process_photo_entry(
         }
     };
 
-    // 11. Get daily note directory
-    let note_path = match parsed_date {
-        Some(d) => vault.ensure_date(&d).await,
-        None => vault.ensure_today().await,
-    }.map_err(|e| {
+    // 11. Get daily note directory (always current day)
+    let note_path = vault.ensure_today().await.map_err(|e| {
         error!(error = %e, "Failed to ensure target daily note before saving photo");
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
@@ -213,18 +200,18 @@ pub async fn process_photo_entry(
     };
 
     vault
-        .append_to_section_for_date("## 📝 Notes", &content, parsed_date)
+        .append_to_section_for_date("## 📝 Notes", &content, None)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to append photo entry to daily note");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-    // 14. Update frontmatter if present
+    // 14. Update frontmatter if present (always current day)
     if let Ok(c) = &classified {
         if let Some(ref frontmatter) = c.frontmatter {
             if !frontmatter.is_empty() {
-                vault.update_frontmatter_for_date(frontmatter, parsed_date).await.map_err(|e| {
+                vault.update_frontmatter_for_date(frontmatter, None).await.map_err(|e| {
                     error!(error = %e, "Failed to update frontmatter from photo classification");
                     Box::new(e) as Box<dyn std::error::Error + Send + Sync>
                 })?;
@@ -317,5 +304,12 @@ mod tests {
             filename.starts_with("2026-03-24-photo-"),
             "slashes should be replaced with dashes"
         );
+    }
+
+    #[test]
+    fn test_photo_filename_generation_uses_today() {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let filename = generate_fallback_filename(&today);
+        assert!(filename.starts_with(&today));
     }
 }

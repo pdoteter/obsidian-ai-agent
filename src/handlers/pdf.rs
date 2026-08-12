@@ -151,20 +151,8 @@ pub async fn process_pdf_entry(
         }
     }
 
-    // Parse target date from classification if present
-    let parsed_date = if let Some(ref note) = classified_res {
-        note.date.as_deref().and_then(|d| {
-            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-        })
-    } else {
-        None
-    };
-
-    // Ensure daily note exists and resolve its parent directory
-    let note_path = match parsed_date {
-        Some(d) => vault.ensure_date(&d).await,
-        None => vault.ensure_today().await,
-    }.map_err(|e| {
+    // PDF documents are always filed under the current day (no date checking)
+    let note_path = vault.ensure_today().await.map_err(|e| {
         error!(error = %e, "Failed to ensure target daily note before saving PDF");
         e
     })?;
@@ -188,9 +176,8 @@ pub async fn process_pdf_entry(
             slug
         };
 
-        let date_prefix = note.date.clone().unwrap_or_else(|| today.clone());
-        let pdf_name = generate_filename(&date_prefix, &slug_final, "pdf");
-        let trans_name = generate_filename(&date_prefix, &slug_final, "md");
+        let pdf_name = generate_filename(&today, &slug_final, "pdf");
+        let trans_name = generate_filename(&today, &slug_final, "md");
 
         (
             pdf_name,
@@ -276,20 +263,20 @@ pub async fn process_pdf_entry(
         )
     };
 
-    // 4. Append to Vault Log section
+    // 4. Append to Vault Log section (always current day)
     vault
-        .append_to_section_for_date("## 📋 Log", &log_content, parsed_date)
+        .append_to_section_for_date("## 📋 Log", &log_content, None)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to append PDF entry to daily note");
             e
         })?;
 
-    // 5. Update frontmatter if present (and Gemini succeeded)
+    // 5. Update frontmatter if present (and Gemini succeeded, always current day)
     if let Some(ref note) = classified_res {
         if let Some(ref frontmatter) = note.frontmatter {
             if !frontmatter.is_empty() {
-                let _ = vault.update_frontmatter_for_date(frontmatter, parsed_date).await.map_err(|e| {
+                let _ = vault.update_frontmatter_for_date(frontmatter, None).await.map_err(|e| {
                     error!(error = %e, "Failed to update frontmatter from PDF transcription");
                     e
                 });
@@ -352,5 +339,12 @@ mod tests {
             .trim_start_matches("2026-05-31-invoice-receipt-")
             .trim_end_matches(".pdf");
         assert_eq!(suffix.len(), 4);
+    }
+
+    #[test]
+    fn test_pdf_filename_generation_uses_today() {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let name = generate_filename(&today, "test-pdf", "pdf");
+        assert!(name.starts_with(&today));
     }
 }
