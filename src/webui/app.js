@@ -64,6 +64,18 @@ document.addEventListener("DOMContentLoaded", () => {
         messageInput.style.height = (messageInput.scrollHeight - 4) + "px";
     });
 
+    // Send prompt on Ctrl+Enter or Cmd+Enter
+    messageInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (typeof chatForm.requestSubmit === "function") {
+                chatForm.requestSubmit();
+            } else {
+                chatForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+            }
+        }
+    });
+
     // 1. Session & Passcode Authentication Flow
     function checkSession() {
         // First check URL query parameter

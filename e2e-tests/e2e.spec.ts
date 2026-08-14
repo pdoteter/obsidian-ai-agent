@@ -124,7 +124,7 @@ startxref
     const inputArea = page.locator('#message-input');
     await inputArea.fill('Buy fresh milk for breakfast #groceries #home');
     
-    // Send
+    // Send via send button click
     await page.locator('#send-btn').click();
 
     // Verify typing indicator appears
@@ -302,5 +302,28 @@ startxref
 
     const assetFiles = fs.readdirSync(assetsFolder);
     expect(assetFiles.some(f => f.endsWith('.pdf'))).toBe(true);
+  });
+
+  test('06 - E2E Ctrl+Enter keyboard shortcut prompt submission verification', async ({ page }) => {
+    await page.goto('/?token=test_token');
+    await expect(page.locator('#auth-gateway')).toBeHidden();
+
+    // Type a note into textarea
+    const inputArea = page.locator('#message-input');
+    await inputArea.fill('Schedule doctor appointment #health');
+    
+    // Trigger submission using Ctrl+Enter keyboard shortcut
+    await inputArea.press('Control+Enter');
+
+    // Verify typing indicator activates
+    await expect(page.locator('#processing-indicator')).toBeVisible();
+
+    // Wait for response bubble from AI agent
+    const botResponse = page.locator('.msg-bubble.bot').last();
+    await expect(botResponse).toBeVisible({ timeout: 60000 });
+    
+    // Check note preview has updated
+    const dailyNotePreview = page.locator('#daily-note-markdown');
+    await expect(dailyNotePreview).toContainText('Schedule doctor appointment');
   });
 });
