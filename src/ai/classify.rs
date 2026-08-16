@@ -386,7 +386,6 @@ pub fn build_image_system_prompt() -> String {
     )
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

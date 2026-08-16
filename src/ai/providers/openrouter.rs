@@ -321,11 +321,17 @@ mod tests {
             .map_err(|e| format!("Failed to initialize client: {}", e))?;
 
         if client.api_key != api_key {
-            return Err(format!("Expected api_key to be {}, got {}", api_key, client.api_key));
+            return Err(format!(
+                "Expected api_key to be {}, got {}",
+                api_key, client.api_key
+            ));
         }
 
         if client.max_tokens != max_tokens {
-            return Err(format!("Expected max_tokens to be {}, got {}", max_tokens, client.max_tokens));
+            return Err(format!(
+                "Expected max_tokens to be {}, got {}",
+                max_tokens, client.max_tokens
+            ));
         }
 
         Ok(())

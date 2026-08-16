@@ -81,6 +81,17 @@ pub async fn handle_finance_message(
 
     if msg.photo().is_some() {
         handle_photo_message(bot, msg, config, ai_service, sync_notifier).await
+    } else if let Some(doc) = msg.document() {
+        if crate::handlers::photo::is_image_document(doc) {
+            handle_photo_document_message(bot, msg, config, ai_service, sync_notifier).await
+        } else {
+            bot.send_message(
+                msg.chat.id,
+                "I currently only support photo and image documents for portfolio attachments. Please send a valid image file!",
+            )
+            .await?;
+            Ok(())
+        }
     } else if msg.voice().is_some() {
         handle_voice_message(bot, msg, config, ai_service, sync_notifier).await
     } else if msg.text().is_some() {
@@ -191,6 +202,59 @@ async fn handle_photo_message(
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
 
+    process_finance_photo_bytes(bot, msg, config, ai_service, sync_notifier, bytes, caption).await
+}
+
+/// Handle photo document updates (uncompressed image files)
+async fn handle_photo_document_message(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Config>,
+    ai_service: Arc<AiService>,
+    sync_notifier: Option<SyncNotifier>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let doc = msg.document().ok_or("No document payload").map_err(|e| {
+        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    })?;
+
+    let caption = msg.caption().map(|s| s.to_string());
+
+    info!(
+        size_bytes = doc.file.size,
+        has_caption = caption.is_some(),
+        "Finance Bot: Downloading photo document"
+    );
+
+    bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto)
+        .await?;
+
+    let file = bot.get_file(&doc.file.id).await.map_err(|e| {
+        error!(error = %e, "Failed to get photo document metadata");
+        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    })?;
+
+    let mut bytes = Vec::new();
+    bot.download_file(&file.path, &mut bytes)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to download photo document");
+            Box::new(ImageError::Download(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+    process_finance_photo_bytes(bot, msg, config, ai_service, sync_notifier, bytes, caption).await
+}
+
+/// Common processing for downloaded photo bytes in Finance Bot
+async fn process_finance_photo_bytes(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Config>,
+    ai_service: Arc<AiService>,
+    sync_notifier: Option<SyncNotifier>,
+    bytes: Vec<u8>,
+    caption: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Resize
     let resized =
         crate::image::process::resize_image(&bytes, config.image.max_dimension).map_err(|e| {
@@ -315,9 +379,15 @@ async fn handle_text_inner(
             .await?;
         return Ok(());
     } else if text == "/finance_tokens" {
-        let classify = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
-        let query = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
-        let transaction = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+        let classify = config
+            .max_tokens_classify
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let query = config
+            .max_tokens_query
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let transaction = config
+            .max_tokens_transaction
+            .load(std::sync::atomic::Ordering::SeqCst);
         let reply = format!(
             "<b>📊 Current Finance Bot max_tokens limits:</b>\n\
              • Classify: <code>{}</code>\n\
@@ -539,9 +609,15 @@ Do not include any explanation or markdown formatting in your response. Return r
         },
     ];
 
-    let max_tokens = config.max_tokens_classify.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_classify
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -697,9 +773,15 @@ Please update the note and return the JSON object."#
         },
     ];
 
-    let max_tokens = config.max_tokens_transaction.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_transaction
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     let cleaned = clean_json_response(&response);
@@ -802,9 +884,15 @@ Please answer."#
         },
     ];
 
-    let max_tokens = config.max_tokens_query.load(std::sync::atomic::Ordering::SeqCst);
+    let max_tokens = config
+        .max_tokens_query
+        .load(std::sync::atomic::Ordering::SeqCst);
     let response = ai_service
-        .chat_completion(&config.openrouter_model_classify, messages, Some(max_tokens))
+        .chat_completion(
+            &config.openrouter_model_classify,
+            messages,
+            Some(max_tokens),
+        )
         .await?;
 
     Ok(response)
@@ -887,7 +975,6 @@ fn get_message_source(msg: &Message) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn test_schema() {

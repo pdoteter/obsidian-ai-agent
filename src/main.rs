@@ -332,14 +332,19 @@ async fn handle_message(
         )
         .await
     } else if let Some(doc) = msg.document() {
-        if doc.mime_type.as_ref().map(|m| m.as_ref()) == Some("application/pdf")
-            || doc
-                .file_name
-                .as_ref()
-                .map(|f| f.ends_with(".pdf"))
-                .unwrap_or(false)
-        {
+        if handlers::pdf::is_pdf_document(doc) {
             handlers::pdf::handle_pdf_message(
+                bot,
+                msg,
+                config,
+                ai_service,
+                vault,
+                sync_notifier,
+                chat_tracker,
+            )
+            .await
+        } else if handlers::photo::is_image_document(doc) {
+            handlers::photo::handle_photo_document_message(
                 bot,
                 msg,
                 config,
@@ -352,7 +357,7 @@ async fn handle_message(
         } else {
             bot.send_message(
                 msg.chat.id,
-                "I currently only support PDF documents. Please send a valid PDF!",
+                "I currently only support PDF and image documents. Please send a valid PDF or photo!",
             )
             .await?;
             Ok(())

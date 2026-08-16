@@ -12,6 +12,32 @@ use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 
+/// Check whether a Telegram Document represents an image based on mime_type or file extension.
+pub fn is_image_document(doc: &teloxide::types::Document) -> bool {
+    if let Some(mime) = &doc.mime_type {
+        if mime.as_ref().starts_with("image/") {
+            return true;
+        }
+    }
+    if let Some(filename) = &doc.file_name {
+        let lower = filename.to_lowercase();
+        if lower.ends_with(".jpg")
+            || lower.ends_with(".jpeg")
+            || lower.ends_with(".png")
+            || lower.ends_with(".webp")
+            || lower.ends_with(".heic")
+            || lower.ends_with(".heif")
+            || lower.ends_with(".tiff")
+            || lower.ends_with(".tif")
+            || lower.ends_with(".bmp")
+            || lower.ends_with(".gif")
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Handle incoming photo messages: download → resize → EXIF → classify → save → append to vault
 pub async fn handle_photo_message(
     bot: Bot,
@@ -89,6 +115,99 @@ pub async fn handle_photo_message(
         }
         Err(e) => {
             error!(error = %e, "Failed to process photo entry");
+            bot.send_message(msg.chat.id, format!("❌ Failed to save photo: {}", e))
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle incoming photo document messages (sent uncompressed as a file): download → resize → EXIF → classify → save → append to vault
+pub async fn handle_photo_document_message(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Config>,
+    ai_service: Arc<AiService>,
+    vault: Arc<DailyNoteManager>,
+    sync_notifier: Option<SyncNotifier>,
+    chat_tracker: ChatIdTracker,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // 1. Auth check
+    if let Some(user) = msg.from.as_ref() {
+        if !config.is_user_allowed(user.id.0) {
+            info!(
+                user_id = user.id.0,
+                "Unauthorized user, ignoring photo document"
+            );
+            return Ok(());
+        }
+    }
+
+    // Track chat_id for conflict notifications (after auth check)
+    chat_tracker.set(msg.chat.id).await;
+
+    // 2. Extract document payload
+    let doc = msg
+        .document()
+        .ok_or("No document in message")
+        .map_err(|e| {
+            error!(error = %e, "Photo document message missing document payload");
+            Box::new(ImageError::Download(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+    // 3. Extract caption
+    let caption = msg.caption().map(|s| s.to_string());
+
+    // 4. Download to memory
+    let file = bot.get_file(&doc.file.id).await.map_err(|e| {
+        error!(
+            error = %e,
+            "Failed to fetch Telegram file metadata for photo document"
+        );
+        Box::new(ImageError::Download(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    })?;
+
+    let mut bytes = Vec::new();
+    bot.download_file(&file.path, &mut bytes)
+        .await
+        .map_err(|e| {
+            error!(
+                error = %e,
+                "Failed to download photo document bytes from Telegram"
+            );
+            Box::new(ImageError::Download(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+    info!(
+        size_bytes = bytes.len(),
+        has_caption = caption.is_some(),
+        "Downloaded photo document"
+    );
+
+    bot.send_chat_action(msg.chat.id, ChatAction::UploadPhoto)
+        .await?;
+
+    // Process the photo entry (resize, EXIF extract, classify, save, append, notify sync)
+    let process_result = process_photo_entry(
+        &bytes,
+        caption.as_deref(),
+        &config,
+        &ai_service,
+        &vault,
+        sync_notifier.as_ref(),
+    )
+    .await;
+
+    match process_result {
+        Ok((_filename, summary)) => {
+            bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
+                .await?;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to process photo document entry");
             bot.send_message(msg.chat.id, format!("❌ Failed to save photo: {}", e))
                 .await?;
         }
@@ -220,7 +339,7 @@ pub async fn process_photo_entry(
     }
 
     // 15. Notify git sync
-    if let Some(ref notifier) = sync_notifier {
+    if let Some(notifier) = sync_notifier {
         notifier.notify();
     }
 
@@ -311,5 +430,30 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let filename = generate_fallback_filename(&today);
         assert!(filename.starts_with(&today));
+    }
+
+    #[test]
+    fn test_is_image_document() {
+        let mut doc = teloxide::types::Document {
+            file: teloxide::types::FileMeta {
+                id: "test".into(),
+                unique_id: "u_test".into(),
+                size: 1234,
+            },
+            thumbnail: None,
+            file_name: Some("photo.JPG".to_string()),
+            mime_type: None,
+        };
+
+        assert!(is_image_document(&doc));
+
+        doc.file_name = Some("document.pdf".to_string());
+        assert!(!is_image_document(&doc));
+
+        doc.mime_type = "image/png".parse().ok();
+        assert!(is_image_document(&doc));
+
+        doc.mime_type = "image/webp".parse().ok();
+        assert!(is_image_document(&doc));
     }
 }

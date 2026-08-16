@@ -420,7 +420,8 @@ impl DailyNoteManager {
         section_heading: &str,
         content: &str,
     ) -> Result<PathBuf, VaultError> {
-        self.append_to_section_for_date(section_heading, content, None).await
+        self.append_to_section_for_date(section_heading, content, None)
+            .await
     }
 
     /// Replace an existing entry in a specific section by matching URL in the daily note for a target date.
@@ -465,7 +466,8 @@ impl DailyNoteManager {
         url: &str,
         new_content: &str,
     ) -> Result<PathBuf, VaultError> {
-        self.replace_entry_by_url_for_date(section_heading, url, new_content, None).await
+        self.replace_entry_by_url_for_date(section_heading, url, new_content, None)
+            .await
     }
 
     /// Update frontmatter fields in target date's daily note
@@ -1011,7 +1013,10 @@ mod tests {
         let note_path = manager.ensure_date(&target_date).await.unwrap();
 
         assert!(note_path.exists());
-        assert_eq!(note_path.file_name().unwrap().to_str().unwrap(), "2026-08-10.md");
+        assert_eq!(
+            note_path.file_name().unwrap().to_str().unwrap(),
+            "2026-08-10.md"
+        );
     }
 
     #[tokio::test]
@@ -1028,7 +1033,10 @@ mod tests {
         };
 
         let target_date = chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
-        let path = manager.append_to_section_for_date("## 📝 Notes", "- Hairdresser", Some(target_date)).await.unwrap();
+        let path = manager
+            .append_to_section_for_date("## 📝 Notes", "- Hairdresser", Some(target_date))
+            .await
+            .unwrap();
 
         let content = fs::read_to_string(&path).await.unwrap();
         assert!(content.contains("- Hairdresser"));

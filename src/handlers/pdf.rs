@@ -12,6 +12,21 @@ use crate::git::chat_tracker::ChatIdTracker;
 use crate::git::debounce::SyncNotifier;
 use crate::vault::daily_note::DailyNoteManager;
 
+/// Check whether a Telegram Document represents a PDF file based on mime_type or file extension.
+pub fn is_pdf_document(doc: &teloxide::types::Document) -> bool {
+    if let Some(mime) = &doc.mime_type {
+        if mime.as_ref() == "application/pdf" {
+            return true;
+        }
+    }
+    if let Some(filename) = &doc.file_name {
+        if filename.to_lowercase().ends_with(".pdf") {
+            return true;
+        }
+    }
+    false
+}
+
 /// Handle incoming PDF document messages from Telegram: download → transcribe/OCR via Gemini → save PDF & transcript → log in vault
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_pdf_message(
@@ -276,10 +291,13 @@ pub async fn process_pdf_entry(
     if let Some(ref note) = classified_res {
         if let Some(ref frontmatter) = note.frontmatter {
             if !frontmatter.is_empty() {
-                let _ = vault.update_frontmatter_for_date(frontmatter, None).await.map_err(|e| {
-                    error!(error = %e, "Failed to update frontmatter from PDF transcription");
-                    e
-                });
+                let _ = vault
+                    .update_frontmatter_for_date(frontmatter, None)
+                    .await
+                    .map_err(|e| {
+                        error!(error = %e, "Failed to update frontmatter from PDF transcription");
+                        e
+                    });
             }
         }
     }
@@ -346,5 +364,27 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let name = generate_filename(&today, "test-pdf", "pdf");
         assert!(name.starts_with(&today));
+    }
+
+    #[test]
+    fn test_is_pdf_document() {
+        let mut doc = teloxide::types::Document {
+            file: teloxide::types::FileMeta {
+                id: "test".into(),
+                unique_id: "u_test".into(),
+                size: 1234,
+            },
+            thumbnail: None,
+            file_name: Some("report.pdf".to_string()),
+            mime_type: None,
+        };
+
+        assert!(is_pdf_document(&doc));
+
+        doc.file_name = Some("photo.jpg".to_string());
+        assert!(!is_pdf_document(&doc));
+
+        doc.mime_type = "application/pdf".parse().ok();
+        assert!(is_pdf_document(&doc));
     }
 }

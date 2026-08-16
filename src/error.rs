@@ -17,7 +17,6 @@ pub enum ImageError {
     #[error("Image resize failed: {0}")]
     ResizeFailed(String),
 
-
     #[error("Failed to save image: {0}")]
     SaveFailed(String),
 
@@ -136,7 +135,6 @@ pub enum AppError {
     #[error("URL processing error: {0}")]
     Url(#[from] UrlError),
 }
-
 
 #[cfg(test)]
 mod tests {

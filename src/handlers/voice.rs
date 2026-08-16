@@ -158,9 +158,10 @@ pub async fn process_voice_entry(
     };
 
     // Format and write to vault
-    let parsed_date = classified.date.as_deref().and_then(|d| {
-        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()
-    });
+    let parsed_date = classified
+        .date
+        .as_deref()
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
     let (section, content) = writer::format_for_daily_note(&classified);
     vault
         .append_to_section_for_date(section, &content, parsed_date)
