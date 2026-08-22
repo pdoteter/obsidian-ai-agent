@@ -319,13 +319,13 @@ fn convert_to_gemini_schema(mut schema: Value) -> Value {
         if let Some(properties) = obj.get_mut("properties") {
             if let Some(prop_obj) = properties.as_object_mut() {
                 for (_, prop_val) in prop_obj.iter_mut() {
-                    *prop_val = convert_to_gemini_schema(prop_val.clone());
+                    *prop_val = convert_to_gemini_schema(prop_val.take());
                 }
             }
         }
 
         if let Some(items) = obj.get_mut("items") {
-            *items = convert_to_gemini_schema(items.clone());
+            *items = convert_to_gemini_schema(items.take());
         }
     }
     schema
