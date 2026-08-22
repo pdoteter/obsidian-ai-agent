@@ -517,7 +517,7 @@ async fn post_photo_message(
     .await;
 
     match result {
-        Ok((filename, summary)) => {
+        Ok((filename, summary, _exif_missing)) => {
             broadcast_note_update(&state).await;
             (
                 StatusCode::OK,

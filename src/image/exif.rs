@@ -30,10 +30,8 @@ pub fn extract_exif(bytes: &[u8]) -> ExifData {
         Err(_) => return ExifData::default(),
     };
 
-    let mut result = ExifData::default();
-
     // Extract DateTimeOriginal tag
-    result.date_taken = exif_data
+    let date_taken = exif_data
         .get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY)
         .and_then(|f| match &f.value {
             exif::Value::Ascii(vec) => vec.first(),
@@ -42,25 +40,114 @@ pub fn extract_exif(bytes: &[u8]) -> ExifData {
         .and_then(|bytes| std::str::from_utf8(bytes).ok())
         .map(|s| s.to_string());
 
-    // Extract GPS Latitude
-    result.gps_lat = exif_data
-        .get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
+    // Extract GPS Latitude (degrees, minutes, seconds + ref)
+    let gps_lat = extract_gps_coordinate(
+        &exif_data,
+        exif::Tag::GPSLatitude,
+        exif::Tag::GPSLatitudeRef,
+    );
+
+    // Extract GPS Longitude (degrees, minutes, seconds + ref)
+    let gps_lon = extract_gps_coordinate(
+        &exif_data,
+        exif::Tag::GPSLongitude,
+        exif::Tag::GPSLongitudeRef,
+    );
+
+    ExifData {
+        date_taken,
+        gps_lat,
+        gps_lon,
+    }
+}
+
+fn parse_rational(r: &exif::Rational) -> f64 {
+    if r.denom == 0 {
+        0.0
+    } else {
+        r.num as f64 / r.denom as f64
+    }
+}
+
+fn extract_gps_coordinate(
+    exif_data: &exif::Exif,
+    coord_tag: exif::Tag,
+    ref_tag: exif::Tag,
+) -> Option<f64> {
+    let rationals = exif_data
+        .get_field(coord_tag, exif::In::PRIMARY)
         .and_then(|f| match &f.value {
-            exif::Value::Rational(vec) => vec.first(),
+            exif::Value::Rational(vec) => Some(vec.as_slice()),
+            _ => None,
+        })?;
+
+    if rationals.is_empty() {
+        return None;
+    }
+
+    let degrees = parse_rational(&rationals[0]);
+    let minutes = if rationals.len() > 1 {
+        parse_rational(&rationals[1])
+    } else {
+        0.0
+    };
+    let seconds = if rationals.len() > 2 {
+        parse_rational(&rationals[2])
+    } else {
+        0.0
+    };
+
+    let mut decimal = degrees + (minutes / 60.0) + (seconds / 3600.0);
+
+    let ref_str = exif_data
+        .get_field(ref_tag, exif::In::PRIMARY)
+        .and_then(|f| match &f.value {
+            exif::Value::Ascii(vec) => vec.first(),
             _ => None,
         })
-        .map(|r| r.num as f64 / r.denom as f64);
+        .and_then(|bytes| std::str::from_utf8(bytes).ok());
 
-    // Extract GPS Longitude
-    result.gps_lon = exif_data
-        .get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
-        .and_then(|f| match &f.value {
-            exif::Value::Rational(vec) => vec.first(),
-            _ => None,
-        })
-        .map(|r| r.num as f64 / r.denom as f64);
+    if let Some(r) = ref_str {
+        let r = r.trim().to_uppercase();
+        if r.starts_with('S') || r.starts_with('W') {
+            decimal = -decimal;
+        }
+    }
 
-    result
+    Some(decimal)
+}
+
+impl ExifData {
+    /// Try to parse date_taken (which is usually in format "YYYY:MM:DD HH:MM:SS" or "YYYY-MM-DD HH:MM:SS")
+    /// into (date_str: "YYYY-MM-DD", time_str: "HH:MM").
+    pub fn parsed_date_time(&self) -> Option<(String, String)> {
+        let dt_str = self.date_taken.as_deref()?;
+        let parts: Vec<&str> = dt_str.split_whitespace().collect();
+        if parts.len() >= 2 {
+            let date_part = parts[0].replace(':', "-");
+            let time_parts: Vec<&str> = parts[1].split(':').collect();
+            let time_part = if time_parts.len() >= 2 {
+                format!("{}:{}", time_parts[0], time_parts[1])
+            } else {
+                parts[1].to_string()
+            };
+            Some((date_part, time_part))
+        } else {
+            None
+        }
+    }
+
+    /// Format geo link as `[Google Maps](https://www.google.com/maps?q=lat,lon)` or `[<label>](https://www.google.com/maps?q=lat,lon)` strictly with NO space between latitude and longitude.
+    pub fn format_geo_link(&self, name: Option<&str>) -> Option<String> {
+        if let (Some(lat), Some(lon)) = (self.gps_lat, self.gps_lon) {
+            let label = name.unwrap_or("Google Maps");
+            Some(format!(
+                "[{label}](https://www.google.com/maps?q={lat:.6},{lon:.6})"
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 /// Format EXIF data for inclusion in AI context.
@@ -76,7 +163,7 @@ pub fn format_exif_context(exif: &ExifData) -> String {
     }
 
     if let (Some(lat), Some(lon)) = (exif.gps_lat, exif.gps_lon) {
-        parts.push(format!("Location: {}, {}", lat, lon));
+        parts.push(format!("Location: {lat:.6}, {lon:.6}"));
     }
 
     if parts.is_empty() {
@@ -170,5 +257,93 @@ mod tests {
         let formatted = format_exif_context(&exif);
 
         assert_eq!(formatted, "");
+    }
+
+    #[test]
+    fn test_parsed_date_time() {
+        let exif = ExifData {
+            date_taken: Some("2026:08:16 14:35:22".to_string()),
+            gps_lat: None,
+            gps_lon: None,
+        };
+        let (date, time) = exif.parsed_date_time().expect("should parse date time");
+        assert_eq!(date, "2026-08-16");
+        assert_eq!(time, "14:35");
+    }
+
+    #[test]
+    fn test_format_geo_link_no_space() {
+        let exif = ExifData {
+            date_taken: None,
+            gps_lat: Some(51.219444),
+            gps_lon: Some(4.402500),
+        };
+        let link = exif
+            .format_geo_link(Some("Antwerpen"))
+            .expect("should format geo link");
+        assert_eq!(
+            link,
+            "[Antwerpen](https://www.google.com/maps?q=51.219444,4.402500)"
+        );
+        // Crucial requirement check: no space between lat and lon
+        assert!(!link.contains("maps?q=51.219444, "));
+    }
+
+    #[test]
+    fn test_format_geo_link_default_label() {
+        let exif = ExifData {
+            date_taken: None,
+            gps_lat: Some(51.0),
+            gps_lon: Some(4.0),
+        };
+        let link = exif.format_geo_link(None).expect("should format geo link");
+        assert_eq!(
+            link,
+            "[Google Maps](https://www.google.com/maps?q=51.000000,4.000000)"
+        );
+    }
+
+    #[test]
+    fn test_dms_coordinate_calculation() {
+        // Test latitude: 51 deg, 12 min, 30.618 sec N -> 51.208505
+        let lat_rationals = vec![
+            exif::Rational { num: 51, denom: 1 },
+            exif::Rational { num: 12, denom: 1 },
+            exif::Rational {
+                num: 30618,
+                denom: 1000,
+            },
+        ];
+        let deg = lat_rationals[0].num as f64 / lat_rationals[0].denom as f64;
+        let min = lat_rationals[1].num as f64 / lat_rationals[1].denom as f64;
+        let sec = lat_rationals[2].num as f64 / lat_rationals[2].denom as f64;
+        let lat = deg + (min / 60.0) + (sec / 3600.0);
+        assert_eq!(format!("{lat:.6}"), "51.208505");
+
+        // Test longitude: 4 deg, 23 min, 43.7244 sec E -> 4.395479
+        let lon_rationals = vec![
+            exif::Rational { num: 4, denom: 1 },
+            exif::Rational { num: 23, denom: 1 },
+            exif::Rational {
+                num: 437244,
+                denom: 10000,
+            },
+        ];
+        let deg = lon_rationals[0].num as f64 / lon_rationals[0].denom as f64;
+        let min = lon_rationals[1].num as f64 / lon_rationals[1].denom as f64;
+        let sec = lon_rationals[2].num as f64 / lon_rationals[2].denom as f64;
+        let lon = deg + (min / 60.0) + (sec / 3600.0);
+        assert_eq!(format!("{lon:.6}"), "4.395479");
+
+        let exif = ExifData {
+            date_taken: None,
+            gps_lat: Some(lat),
+            gps_lon: Some(lon),
+        };
+        let link = exif.format_geo_link(None).expect("should format geo link");
+        assert_eq!(
+            link,
+            "[Google Maps](https://www.google.com/maps?q=51.208505,4.395479)"
+        );
     }
 }

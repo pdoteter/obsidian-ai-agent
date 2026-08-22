@@ -108,10 +108,17 @@ pub async fn handle_photo_message(
     .await;
 
     match process_result {
-        Ok((_filename, summary)) => {
+        Ok((_filename, summary, exif_missing)) => {
             // 16. Send confirmation
-            bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
-                .await?;
+            let reply = if exif_missing {
+                format!(
+                    "📸 Foto opgeslagen — {}\n⚠️ Geen EXIF-datum gevonden. Tijdstip van verzenden gebruikt. (Tip: verstuur foto's als bestand/document om EXIF te behouden)",
+                    summary
+                )
+            } else {
+                format!("📸 Foto opgeslagen — {}", summary)
+            };
+            bot.send_message(msg.chat.id, reply).await?;
         }
         Err(e) => {
             error!(error = %e, "Failed to process photo entry");
@@ -202,9 +209,16 @@ pub async fn handle_photo_document_message(
     .await;
 
     match process_result {
-        Ok((_filename, summary)) => {
-            bot.send_message(msg.chat.id, format!("📸 Photo saved — {}", summary))
-                .await?;
+        Ok((_filename, summary, exif_missing)) => {
+            let reply = if exif_missing {
+                format!(
+                    "📸 Foto opgeslagen — {}\n⚠️ Geen EXIF-datum gevonden. Tijdstip van verzenden gebruikt. (Tip: verstuur foto's als bestand/document om EXIF te behouden)",
+                    summary
+                )
+            } else {
+                format!("📸 Foto opgeslagen — {}", summary)
+            };
+            bot.send_message(msg.chat.id, reply).await?;
         }
         Err(e) => {
             error!(error = %e, "Failed to process photo document entry");
@@ -217,7 +231,7 @@ pub async fn handle_photo_document_message(
 }
 
 /// Process a photo entry: resize → EXIF → classify via Vision AI → save to vault → write to note.
-/// Returns the saved filename and classification summary.
+/// Returns the saved filename, classification summary, and a boolean indicating if EXIF was missing.
 pub async fn process_photo_entry(
     bytes: &[u8],
     caption: Option<&str>,
@@ -225,7 +239,7 @@ pub async fn process_photo_entry(
     ai_service: &AiService,
     vault: &DailyNoteManager,
     sync_notifier: Option<&SyncNotifier>,
-) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(String, String, bool), Box<dyn std::error::Error + Send + Sync>> {
     // 5. Resize
     let resized =
         crate::image::process::resize_image(bytes, config.image.max_dimension).map_err(|e| {
@@ -235,6 +249,8 @@ pub async fn process_photo_entry(
 
     // 6. EXIF from original bytes
     let exif_data = crate::image::exif::extract_exif(bytes);
+    let exif_missing = exif_data.date_taken.is_none();
+    let parsed_dt = exif_data.parsed_date_time();
 
     // 7. Format EXIF context
     let exif_context = crate::image::exif::format_exif_context(&exif_data);
@@ -254,31 +270,45 @@ pub async fn process_photo_entry(
         )
         .await;
 
-    // 10. Generate filename (with fallback on AI failure, always current day)
+    // 10. Generate filename (using EXIF date if available, fallback to today)
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let note_date_str = if let Some((ref d, _)) = parsed_dt {
+        d.clone()
+    } else if let Ok(ref c) = classified {
+        c.date.clone().unwrap_or_else(|| today.clone())
+    } else {
+        today.clone()
+    };
+
+    let target_naive_date = chrono::NaiveDate::parse_from_str(&note_date_str, "%Y-%m-%d").ok();
 
     let (filename, summary) = match &classified {
         Ok(c) => {
             let slug = crate::ai::classify::slug_from_summary(&c.summary);
             (
-                crate::image::process::generate_filename(&today, &slug),
+                crate::image::process::generate_filename(&note_date_str, &slug),
                 c.summary.clone(),
             )
         }
         Err(e) => {
             error!(error = %e, "Image classification failed, using fallback filename/content");
             (
-                generate_fallback_filename(&today),
+                generate_fallback_filename(&note_date_str),
                 caption.unwrap_or("Photo").to_string(),
             )
         }
     };
 
-    // 11. Get daily note directory (always current day)
-    let note_path = vault.ensure_today().await.map_err(|e| {
+    // 11. Get daily note directory
+    let note_path = match target_naive_date {
+        Some(d) => vault.ensure_date(&d).await,
+        None => vault.ensure_today().await,
+    }
+    .map_err(|e| {
         error!(error = %e, "Failed to ensure target daily note before saving photo");
         Box::new(e) as Box<dyn std::error::Error + Send + Sync>
     })?;
+
     let note_dir = note_path
         .parent()
         .ok_or("Daily note has no parent directory")
@@ -307,33 +337,65 @@ pub async fn process_photo_entry(
         "Saved photo to assets"
     );
 
-    // 13. Write to daily note
-    let content = match &classified {
-        Ok(c) => format_photo_content(
-            &config.image.assets_folder,
-            &filename,
-            Some(&c.markdown),
-            None,
-        ),
-        Err(_) => format_photo_content(&config.image.assets_folder, &filename, None, caption),
+    // 13. Determine section and format content
+    let time_str = if let Some((_, ref t)) = parsed_dt {
+        t.clone()
+    } else {
+        chrono::Local::now().format("%H:%M").to_string()
+    };
+
+    let (section, content) = match &classified {
+        Ok(c) => {
+            let section = match c.category {
+                crate::ai::classify::NoteCategory::Todo => "## ✅ Todos",
+                crate::ai::classify::NoteCategory::Log => "## 📋 Log",
+                crate::ai::classify::NoteCategory::Note => "## 📝 Notes",
+            };
+
+            let geo_link = exif_data.format_geo_link(None);
+            let formatted = format_photo_content(
+                &config.image.assets_folder,
+                &filename,
+                Some(&c.markdown),
+                None,
+                Some(&time_str),
+                geo_link.as_deref(),
+            );
+            (section, formatted)
+        }
+        Err(_) => {
+            let geo_link = exif_data.format_geo_link(None);
+            let formatted = format_photo_content(
+                &config.image.assets_folder,
+                &filename,
+                None,
+                caption,
+                Some(&time_str),
+                geo_link.as_deref(),
+            );
+            ("## 📝 Notes", formatted)
+        }
     };
 
     vault
-        .append_to_section_for_date("## 📝 Notes", &content, None)
+        .append_to_section_for_date(section, &content, target_naive_date)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to append photo entry to daily note");
             Box::new(e) as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-    // 14. Update frontmatter if present (always current day)
+    // 14. Update frontmatter if present
     if let Ok(c) = &classified {
         if let Some(ref frontmatter) = c.frontmatter {
             if !frontmatter.is_empty() {
-                vault.update_frontmatter_for_date(frontmatter, None).await.map_err(|e| {
-                    error!(error = %e, "Failed to update frontmatter from photo classification");
-                    Box::new(e) as Box<dyn std::error::Error + Send + Sync>
-                })?;
+                vault
+                    .update_frontmatter_for_date(frontmatter, target_naive_date)
+                    .await
+                    .map_err(|e| {
+                        error!(error = %e, "Failed to update frontmatter from photo classification");
+                        Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+                    })?;
             }
         }
     }
@@ -343,7 +405,17 @@ pub async fn process_photo_entry(
         notifier.notify();
     }
 
-    Ok((filename, summary))
+    Ok((filename, summary, exif_missing))
+}
+
+/// Sanitize any legacy or accidental `(geo:lat,lon)` links into `(https://www.google.com/maps?q=lat,lon)`.
+pub fn sanitize_geo_links(text: &str) -> String {
+    static GEO_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = GEO_RE.get_or_init(|| {
+        regex::Regex::new(r"\(geo:([0-9.-]+),\s*([0-9.-]+)\)").expect("Invalid geo regex")
+    });
+    re.replace_all(text, "(https://www.google.com/maps?q=$1,$2)")
+        .to_string()
 }
 
 fn format_photo_content(
@@ -351,12 +423,36 @@ fn format_photo_content(
     filename: &str,
     markdown: Option<&str>,
     caption: Option<&str>,
+    time: Option<&str>,
+    geo_link: Option<&str>,
 ) -> String {
     let wiki_link = format!("![[{}/{}]]", assets_folder, filename);
+    let time_prefix = match time {
+        Some(t) => format!("- {} — ", t),
+        None => "- ".to_string(),
+    };
+
     if let Some(md) = markdown {
-        format!("{}\n{}", wiki_link, md)
+        let sanitized = sanitize_geo_links(md);
+        let entry_text = sanitized.trim_start_matches("- ").trim();
+        let geo_suffix = match geo_link {
+            Some(g) if !entry_text.contains(g) && !entry_text.contains("google.com/maps") => {
+                format!(" — {}", g)
+            }
+            _ => String::new(),
+        };
+        format!("{}\n{}{}{}", wiki_link, time_prefix, entry_text, geo_suffix)
     } else if let Some(cap) = caption {
-        format!("{}\n{}", wiki_link, cap)
+        let sanitized = sanitize_geo_links(cap);
+        let geo_suffix = match geo_link {
+            Some(g) if !sanitized.contains(g) && !sanitized.contains("google.com/maps") => {
+                format!(" — {}", g)
+            }
+            _ => String::new(),
+        };
+        format!("{}\n{}{}{}", wiki_link, time_prefix, sanitized, geo_suffix)
+    } else if let Some(g) = geo_link {
+        format!("{}\n{}{}", wiki_link, time_prefix, g)
     } else {
         wiki_link
     }
@@ -378,12 +474,74 @@ mod tests {
         let filename = "2026-03-24-sunset-a1b2.jpg";
         let markdown = "Beautiful sunset over the harbor at golden hour.";
 
-        let content = format_photo_content("assets", filename, Some(markdown), None);
+        let content = format_photo_content(
+            "assets",
+            filename,
+            Some(markdown),
+            None,
+            Some("18:30"),
+            None,
+        );
 
         assert_eq!(
             content,
-            "![[assets/2026-03-24-sunset-a1b2.jpg]]\nBeautiful sunset over the harbor at golden hour."
+            "![[assets/2026-03-24-sunset-a1b2.jpg]]\n- 18:30 — Beautiful sunset over the harbor at golden hour."
         );
+    }
+
+    #[test]
+    fn test_photo_content_format_with_geo() {
+        let filename = "2026-03-24-pizza.jpg";
+        let markdown = "Heerlijke pizza margherita";
+        let geo = "[Pizzeria](https://www.google.com/maps?q=41.902800,12.496400)";
+
+        let content = format_photo_content(
+            "assets",
+            filename,
+            Some(markdown),
+            None,
+            Some("19:45"),
+            Some(geo),
+        );
+
+        assert_eq!(
+            content,
+            "![[assets/2026-03-24-pizza.jpg]]\n- 19:45 — Heerlijke pizza margherita — [Pizzeria](https://www.google.com/maps?q=41.902800,12.496400)"
+        );
+        // Ensure no space between lat and lon
+        assert!(!content.contains("maps?q=41.902800, "));
+    }
+
+    #[test]
+    fn test_sanitize_geo_links() {
+        let input = "Bezoek aan [KMSKA, Antwerpen](geo:51.208505,4.395479) was fantastisch.";
+        let output = sanitize_geo_links(input);
+        assert_eq!(
+            output,
+            "Bezoek aan [KMSKA, Antwerpen](https://www.google.com/maps?q=51.208505,4.395479) was fantastisch."
+        );
+    }
+
+    #[test]
+    fn test_photo_content_sanitizes_embedded_geo_and_avoids_duplicate() {
+        let filename = "2026-08-08-kmska.jpg";
+        let markdown = "Bezoek aan het KMSKA [KMSKA, Antwerpen](geo:51.208505,4.395479)";
+        let geo = "[KMSKA, Antwerpen](https://www.google.com/maps?q=51.208505,4.395479)";
+
+        let content = format_photo_content(
+            "assets",
+            filename,
+            Some(markdown),
+            None,
+            Some("12:11"),
+            Some(geo),
+        );
+
+        assert_eq!(
+            content,
+            "![[assets/2026-08-08-kmska.jpg]]\n- 12:11 — Bezoek aan het KMSKA [KMSKA, Antwerpen](https://www.google.com/maps?q=51.208505,4.395479)"
+        );
+        assert!(!content.contains("(geo:"));
     }
 
     #[test]
