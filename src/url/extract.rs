@@ -17,6 +17,7 @@ pub async fn fetch_page_content(
     max_bytes: usize,
 ) -> Result<PageContent, UrlError> {
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| UrlError::FetchFailed {
@@ -176,6 +177,7 @@ fn normalize_text(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::time::{sleep, Duration};
@@ -185,17 +187,19 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut request_buffer = [0_u8; 2048];
+                let _ = stream.read(&mut request_buffer).await;
 
-            let mut request_buffer = [0_u8; 2048];
-            let _ = stream.read(&mut request_buffer).await;
+                if let Some(delay) = response_delay {
+                    sleep(delay).await;
+                }
 
-            if let Some(delay) = response_delay {
-                sleep(delay).await;
+                let _ = stream.write_all(raw_response.as_bytes()).await;
+                let _ = stream.flush().await;
+                sleep(Duration::from_millis(50)).await;
+                let _ = stream.shutdown().await;
             }
-
-            let _ = stream.write_all(raw_response.as_bytes()).await;
-            let _ = stream.shutdown().await;
         });
 
         format!("http://{}", addr)
@@ -209,6 +213,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn extracts_html_title_tag() {
         let html =
             "<html><head><title>Example Title</title></head><body><p>Hello</p></body></html>";
@@ -219,6 +224,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn prefers_og_title_over_html_title() {
         let html = r#"<html><head>
             <title>Regular Title</title>
@@ -231,6 +237,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn extracts_meta_description() {
         let html = r#"<html><head>
             <meta name="description" content="A short summary" />
@@ -242,6 +249,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn extracts_readable_body_text_from_html() {
         let html = r#"<html><head><title>T</title></head><body>
             <header>Top Nav</header>
@@ -262,18 +270,17 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn returns_content_too_large_when_max_bytes_exceeded() {
-        let body = "<html><body><p>tiny</p></body></html>";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 999999\r\nConnection: close\r\n\r\n{body}"
-        );
-        let url = spawn_server(response, None).await;
+        let body = format!("<html><body><p>{}</p></body></html>", "a".repeat(200));
+        let url = spawn_server(html_response("HTTP/1.1 200 OK", &body), None).await;
 
         let err = fetch_page_content(&url, 5, 100).await.unwrap_err();
         assert!(matches!(err, UrlError::ContentTooLarge { .. }));
     }
 
     #[tokio::test]
+    #[serial]
     async fn returns_timeout_when_request_exceeds_deadline() {
         let html = "<html><head><title>Slow Page</title></head><body><p>hello</p></body></html>";
         let url = spawn_server(
@@ -287,6 +294,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn returns_fetch_failed_on_http_error_status() {
         let html = "<html><body><h1>Not found</h1></body></html>";
         let url = spawn_server(html_response("HTTP/1.1 404 Not Found", html), None).await;
@@ -296,6 +304,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn handles_empty_minimal_html_gracefully() {
         let html = "<html></html>";
         let url = spawn_server(html_response("HTTP/1.1 200 OK", html), None).await;
@@ -308,6 +317,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn returns_fetch_failed_when_connection_cannot_be_established() {
         let err = fetch_page_content("http://127.0.0.1:9/unreachable", 1, 1024 * 32)
             .await

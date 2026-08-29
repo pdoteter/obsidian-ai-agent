@@ -355,17 +355,50 @@ async fn handle_message(
             )
             .await
         } else {
-            bot.send_message(
-                msg.chat.id,
-                "I currently only support PDF and image documents. Please send a valid PDF or photo!",
+            handlers::file::handle_generic_document_message(
+                bot,
+                msg,
+                config,
+                vault,
+                sync_notifier,
+                chat_tracker,
             )
-            .await?;
-            Ok(())
+            .await
         }
+    } else if msg.audio().is_some() {
+        handlers::file::handle_audio_file_message(
+            bot,
+            msg,
+            config,
+            vault,
+            sync_notifier,
+            chat_tracker,
+        )
+        .await
+    } else if msg.video().is_some() {
+        handlers::file::handle_video_file_message(
+            bot,
+            msg,
+            config,
+            vault,
+            sync_notifier,
+            chat_tracker,
+        )
+        .await
+    } else if msg.animation().is_some() {
+        handlers::file::handle_animation_file_message(
+            bot,
+            msg,
+            config,
+            vault,
+            sync_notifier,
+            chat_tracker,
+        )
+        .await
     } else {
         bot.send_message(
             msg.chat.id,
-            "I can process text, voice, photo, and PDF messages. Please send one of those!",
+            "I can process text, voice, photo, PDF, and general file messages. Please send one of those!",
         )
         .await?;
         Ok(())

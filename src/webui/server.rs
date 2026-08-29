@@ -74,6 +74,7 @@ pub async fn start_server(state: WebuiState, port: u16) {
         .route("/api/photo", post(post_photo_message))
         .route("/api/voice", post(post_voice_message))
         .route("/api/pdf", post(post_pdf_message))
+        .route("/api/file", post(post_generic_file_message))
         // Real-time updates WebSocket
         .route("/ws", get(ws_handler))
         .layer(DefaultBodyLimit::max(250 * 1024 * 1024))
@@ -142,20 +143,31 @@ async fn serve_asset(
 
     match tokio::fs::read(&asset_path).await {
         Ok(bytes) => {
-            let mime = if filename.ends_with(".png") {
+            let lower = filename.to_lowercase();
+            let mime = if lower.ends_with(".png") {
                 "image/png"
-            } else if filename.ends_with(".gif") {
+            } else if lower.ends_with(".gif") {
                 "image/gif"
-            } else if filename.ends_with(".webp") {
+            } else if lower.ends_with(".webp") {
                 "image/webp"
-            } else if filename.ends_with(".pdf") {
-                "application/pdf"
-            } else if filename.ends_with(".md") {
-                "text/markdown"
-            } else if filename.ends_with(".txt") {
-                "text/plain"
-            } else {
+            } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
                 "image/jpeg"
+            } else if lower.ends_with(".svg") {
+                "image/svg+xml"
+            } else if lower.ends_with(".pdf") {
+                "application/pdf"
+            } else if lower.ends_with(".md") {
+                "text/markdown"
+            } else if lower.ends_with(".txt") {
+                "text/plain"
+            } else if lower.ends_with(".json") {
+                "application/json"
+            } else if lower.ends_with(".mp3") {
+                "audio/mpeg"
+            } else if lower.ends_with(".mp4") {
+                "video/mp4"
+            } else {
+                "application/octet-stream"
             };
 
             Response::builder()
@@ -662,6 +674,76 @@ async fn post_pdf_message(
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to process PDF note: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+// POST /api/file - Submit an unrecognized or generic multipart file
+#[derive(Serialize)]
+struct FileMessageResponse {
+    filename: String,
+    original_name: String,
+    warning: String,
+}
+
+async fn post_generic_file_message(
+    headers: HeaderMap,
+    State(state): State<WebuiState>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.config) {
+        return (status, "Unauthorized").into_response();
+    }
+
+    let mut file_bytes = Vec::new();
+    let mut caption = None;
+    let mut original_filename = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            original_filename = field.file_name().map(|f| f.to_string());
+            if let Ok(bytes) = field.bytes().await {
+                file_bytes = bytes.to_vec();
+            }
+        } else if name == "caption" {
+            if let Ok(text) = field.text().await {
+                if !text.trim().is_empty() {
+                    caption = Some(text);
+                }
+            }
+        }
+    }
+
+    if file_bytes.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Missing file payload").into_response();
+    }
+
+    let result = crate::handlers::file::process_generic_file_entry(
+        &file_bytes,
+        original_filename.as_deref(),
+        caption.as_deref(),
+        &state.config,
+        &state.vault,
+        state.sync_notifier.as_ref(),
+    )
+    .await;
+
+    match result {
+        Ok((filename, original_name)) => {
+            broadcast_note_update(&state).await;
+            let response = FileMessageResponse {
+                filename,
+                original_name,
+                warning: "Unrecognized file stored as-is in assets folder without AI processing."
+                    .to_string(),
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to process file: {}", e),
         )
             .into_response(),
     }
