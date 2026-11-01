@@ -97,6 +97,10 @@ async fn main() {
     .await
     {
         Ok(c) => {
+            let c = c.with_transcription(
+                config.gemini_transcribe_model(),
+                config.transcribe_language(),
+            );
             providers.insert("gemini".to_string(), Arc::new(c));
         }
         Err(e) => {

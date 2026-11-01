@@ -80,7 +80,7 @@ impl Default for GitConfig {
     }
 }
 
-/// URL handling configuration settings
+/// Voice transcription configuration settings
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TranscriptionConfig {
@@ -298,21 +298,60 @@ impl Config {
     ///
     /// Config file path is resolved from `CONFIG_PATH` env var, defaulting to `./config.yaml`.
     pub fn load() -> Result<Self, ConfigError> {
+        let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
+        let config_path = PathBuf::from(&config_path);
+
+        // Pre-inspect config file if available to see which provider keys are strictly required
+        let pre_parsed_file: Option<FileConfig> = std::fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|s| serde_yml::from_str(&s).ok());
+
+        let (needs_openrouter, needs_openai) = match &pre_parsed_file {
+            Some(f) => {
+                let eff_classify =
+                    f.ai.classification
+                        .provider
+                        .as_deref()
+                        .unwrap_or(&f.ai.provider);
+                let eff_summarize =
+                    f.ai.summarization
+                        .provider
+                        .as_deref()
+                        .unwrap_or(&f.ai.provider);
+                let eff_transcribe = f.ai.transcription.provider.as_deref().unwrap_or(
+                    if f.ai.provider == "gemini" {
+                        "gemini"
+                    } else {
+                        "openai"
+                    },
+                );
+                let openrouter_needed = f.ai.provider == "openrouter"
+                    || eff_classify == "openrouter"
+                    || eff_summarize == "openrouter";
+                let openai_needed = eff_transcribe == "openai";
+                (openrouter_needed, openai_needed)
+            }
+            None => (true, true),
+        };
+
         // Read secrets from environment
         let teloxide_token =
             env::var("TELOXIDE_TOKEN").map_err(|_| ConfigError::Missing("TELOXIDE_TOKEN"))?;
-        let openrouter_api_key = env::var("OPENROUTER_API_KEY")
-            .map_err(|_| ConfigError::Missing("OPENROUTER_API_KEY"))?;
-        let openai_api_key =
-            env::var("OPENAI_API_KEY").map_err(|_| ConfigError::Missing("OPENAI_API_KEY"))?;
+        let openrouter_api_key = if needs_openrouter {
+            env::var("OPENROUTER_API_KEY")
+                .map_err(|_| ConfigError::Missing("OPENROUTER_API_KEY"))?
+        } else {
+            env::var("OPENROUTER_API_KEY").unwrap_or_default()
+        };
+        let openai_api_key = if needs_openai {
+            env::var("OPENAI_API_KEY").map_err(|_| ConfigError::Missing("OPENAI_API_KEY"))?
+        } else {
+            env::var("OPENAI_API_KEY").unwrap_or_default()
+        };
         let gemini_api_key = env::var("GEMINI_API_KEY").ok();
         let gemini_service_account_key_path = env::var("GEMINI_SERVICE_ACCOUNT_KEY_PATH")
             .ok()
             .map(PathBuf::from);
-
-        // Load settings from YAML config file
-        let config_path = env::var("CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
-        let config_path = PathBuf::from(&config_path);
 
         let yaml_content = std::fs::read_to_string(&config_path)
             .map_err(|e| ConfigError::FileRead(config_path.clone(), e.to_string()))?;
@@ -425,6 +464,31 @@ impl Config {
             ai_max_tokens: file.ai.max_tokens,
             pdf_max_tokens: file.ai.pdf_max_tokens,
         })
+    }
+
+    /// Resolve the Gemini model to use for audio transcription.
+    pub fn gemini_transcribe_model(&self) -> String {
+        if let Some(ref m) = self.transcription.model {
+            if !m.trim().is_empty() {
+                return m.clone();
+            }
+        }
+        if self.whisper_model.contains("gemini") {
+            return self.whisper_model.clone();
+        }
+        if self.openrouter_model_classify.contains("gemini") {
+            return self.openrouter_model_classify.clone();
+        }
+        "gemini-2.5-flash".to_string()
+    }
+
+    /// Resolve the optional ISO-639-1 language hint for audio transcription.
+    pub fn transcribe_language(&self) -> Option<String> {
+        self.transcription
+            .language
+            .clone()
+            .filter(|l| !l.trim().is_empty())
+            .or_else(|| self.whisper_language.clone())
     }
 
     /// Check if a user is allowed (empty list = allow all)
@@ -897,8 +961,50 @@ git:
 
     #[test]
     #[serial]
+    fn test_config_load_gemini_transcription_without_openai_key() -> Result<(), String> {
+        use tempfile::tempdir;
+        let temp_dir = tempdir().map_err(|e| e.to_string())?;
+        let config_file = temp_dir.path().join("config.yaml");
+        let vault_dir = temp_dir.path().join("vault");
+        std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
+
+        std::fs::write(
+            &config_file,
+            format!(
+                r#"vault_path: {}
+git:
+  sync_enabled: false
+ai:
+  provider: gemini
+  whisper_language: nl
+"#,
+                vault_dir.display()
+            ),
+        )
+        .map_err(|e| e.to_string())?;
+
+        let old_env = setup_env();
+        env::set_var("CONFIG_PATH", config_file.to_str().unwrap());
+        env::set_var("TELOXIDE_TOKEN", "test_teloxide");
+        env::set_var("GEMINI_API_KEY", "test_gemini");
+
+        let result = Config::load();
+        restore_env(old_env);
+
+        let config = result.map_err(|e| format!("Failed to load config: {:?}", e))?;
+        assert_eq!(config.ai_provider, "gemini");
+        assert!(config.openai_api_key.is_empty());
+        assert_eq!(config.gemini_transcribe_model(), "google/gemini-2.5-flash");
+        assert_eq!(config.transcribe_language().as_deref(), Some("nl"));
+
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
     fn test_config_load_missing_env_vars() {
         let old_env = setup_env();
+        env::set_var("CONFIG_PATH", "/does/not/exist/config.yaml");
 
         // Test missing TELOXIDE_TOKEN
         let result = Config::load();

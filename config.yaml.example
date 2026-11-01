@@ -25,6 +25,13 @@ ai:
   whisper_model: whisper-1                # OpenAI Whisper model for transcription
   whisper_language: nl                    # ISO-639-1 language code (e.g. nl, en, de)
 
+  # Optional: Override provider/model specifically for voice transcription (openai | gemini)
+  # Note: When ai.provider is "gemini", transcription automatically defaults to "gemini".
+  # transcription:
+  #   provider: gemini                    # openai | gemini
+  #   model: gemini-2.5-flash             # Model for audio transcription
+  #   language: nl                        # Optional ISO-639-1 language hint (falls back to whisper_language)
+
   # Classification settings
   # - If provider is openrouter: use OpenRouter model names (e.g. google/gemini-2.5-flash)
   # - If provider is gemini: use native Google model names (e.g. gemini-1.5-flash)

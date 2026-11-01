@@ -36,7 +36,7 @@ ai:
   whisper_model: "whisper-1"
   classify_model: "gemini-2.5-flash"
   transcription:
-    provider: "openai"
+    provider: "gemini"
 "@
 Set-Content -Path (Join-Path $testVaultDir "config.yaml") -Value $testConfig
 

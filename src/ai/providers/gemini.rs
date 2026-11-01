@@ -12,6 +12,7 @@ use crate::error::AiError;
 use crate::url::PageContent;
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
+const DEFAULT_GEMINI_TRANSCRIBE_MODEL: &str = "gemini-2.5-flash";
 const MAX_RETRIES: u32 = 3;
 const REQUEST_TIMEOUT_SECS: u64 = 120;
 
@@ -27,6 +28,8 @@ pub struct GeminiClient {
     oauth_authenticator: Option<YupAuthenticator>,
     max_tokens: u32,
     pdf_max_tokens: u32,
+    transcribe_model: String,
+    transcribe_language: Option<String>,
 }
 
 impl std::fmt::Debug for GeminiClient {
@@ -37,6 +40,8 @@ impl std::fmt::Debug for GeminiClient {
                 "oauth_authenticator",
                 &self.oauth_authenticator.as_ref().map(|_| "Some"),
             )
+            .field("transcribe_model", &self.transcribe_model)
+            .field("transcribe_language", &self.transcribe_language)
             .finish()
     }
 }
@@ -121,7 +126,18 @@ impl GeminiClient {
             oauth_authenticator,
             max_tokens,
             pdf_max_tokens,
+            transcribe_model: DEFAULT_GEMINI_TRANSCRIBE_MODEL.to_string(),
+            transcribe_language: None,
         })
+    }
+
+    /// Configure the model and optional language hint used for audio transcription.
+    pub fn with_transcription(mut self, model: String, language: Option<String>) -> Self {
+        if !model.trim().is_empty() {
+            self.transcribe_model = model;
+        }
+        self.transcribe_language = language.filter(|l| !l.trim().is_empty());
+        self
     }
 
     /// Obtain active authorization token if authenticating via OAuth 2.0
@@ -281,6 +297,27 @@ impl GeminiClient {
                     response
                 ))
             })
+    }
+}
+
+/// Detect audio MIME type from magic bytes, defaulting to `audio/ogg` (Telegram voice format).
+fn detect_audio_mime_type(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(b"OggS") {
+        "audio/ogg"
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WAVE" {
+        "audio/wav"
+    } else if bytes.starts_with(b"fLaC") {
+        "audio/flac"
+    } else if bytes.starts_with(b"ID3")
+        || (bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0)
+    {
+        "audio/mp3"
+    } else if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        "audio/webm"
+    } else if bytes.len() >= 8 && &bytes[4..8] == b"ftyp" {
+        "audio/mp4"
+    } else {
+        "audio/ogg"
     }
 }
 
@@ -513,10 +550,85 @@ impl AiProvider for GeminiClient {
         })
     }
 
-    async fn transcribe(&self, _audio_bytes: &[u8]) -> Result<String, AiError> {
-        Err(AiError::UnsupportedCapability(
-            "Transcription not supported by Gemini provider natively".to_string(),
-        ))
+    async fn transcribe(&self, audio_bytes: &[u8]) -> Result<String, AiError> {
+        if audio_bytes.is_empty() {
+            return Err(AiError::TranscriptionFailed(
+                "Empty audio payload provided for transcription".to_string(),
+            ));
+        }
+
+        let mime_type = detect_audio_mime_type(audio_bytes);
+
+        info!(
+            audio_size_bytes = audio_bytes.len(),
+            mime_type = mime_type,
+            model = %self.transcribe_model,
+            language = ?self.transcribe_language,
+            "Sending audio to Gemini for transcription"
+        );
+
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine;
+        let base64_data = STANDARD.encode(audio_bytes);
+
+        let system_prompt = "You are an accurate speech-to-text audio transcription system. \
+Transcribe the spoken audio verbatim. Output ONLY the raw transcribed text, without any \
+introductory remarks, markdown code blocks, timestamps, or commentary.";
+
+        let user_prompt = match &self.transcribe_language {
+            Some(lang) => format!(
+                "Transcribe this audio accurately. Expected primary language (ISO-639-1): {}.",
+                lang
+            ),
+            None => "Transcribe this audio accurately.".to_string(),
+        };
+
+        let body = json!({
+            "system_instruction": {
+                "parts": [{ "text": system_prompt }]
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64_data
+                        }
+                    },
+                    {
+                        "text": user_prompt
+                    }
+                ]
+            }],
+            "generationConfig": {
+                "maxOutputTokens": self.max_tokens
+            }
+        });
+
+        let response = self.generate_content(&self.transcribe_model, &body).await?;
+        let content = Self::extract_content(&response).map_err(|e| {
+            AiError::TranscriptionFailed(format!(
+                "Failed to extract Gemini transcription response: {}",
+                e
+            ))
+        })?;
+
+        let transcript = content.trim().to_string();
+        if transcript.is_empty() {
+            return Err(AiError::TranscriptionFailed(
+                "Empty transcription returned by Gemini".to_string(),
+            ));
+        }
+
+        info!(
+            transcript_length = transcript.len(),
+            language = ?self.transcribe_language,
+            "Gemini audio transcription complete"
+        );
+        debug!(transcript = %transcript, "Gemini transcription result");
+
+        Ok(transcript)
     }
 
     async fn format_transcript(
@@ -689,6 +801,47 @@ You are receiving a PDF document. Your tasks are:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_detect_audio_mime_type() {
+        assert_eq!(detect_audio_mime_type(b"OggS\x00\x02"), "audio/ogg");
+        assert_eq!(
+            detect_audio_mime_type(b"RIFF\x24\x00\x00\x00WAVEfmt "),
+            "audio/wav"
+        );
+        assert_eq!(detect_audio_mime_type(b"fLaC\x00\x00"), "audio/flac");
+        assert_eq!(detect_audio_mime_type(b"ID3\x04\x00"), "audio/mp3");
+        assert_eq!(detect_audio_mime_type(&[0xFF, 0xFB, 0x90]), "audio/mp3");
+        assert_eq!(
+            detect_audio_mime_type(&[0x1A, 0x45, 0xDF, 0xA3, 0x01]),
+            "audio/webm"
+        );
+        assert_eq!(
+            detect_audio_mime_type(b"\x00\x00\x00\x20ftypM4A "),
+            "audio/mp4"
+        );
+        assert_eq!(detect_audio_mime_type(b"unknown"), "audio/ogg");
+    }
+
+    #[tokio::test]
+    async fn test_gemini_with_transcription_config() {
+        let client = GeminiClient::new(Some("test_key".to_string()), None, 4096, 8192)
+            .await
+            .unwrap()
+            .with_transcription("gemini-2.5-flash".to_string(), Some("nl".to_string()));
+
+        assert_eq!(client.transcribe_model, "gemini-2.5-flash");
+        assert_eq!(client.transcribe_language.as_deref(), Some("nl"));
+    }
+
+    #[tokio::test]
+    async fn test_gemini_transcribe_empty_audio_fails() {
+        let client = GeminiClient::new(Some("test_key".to_string()), None, 4096, 8192)
+            .await
+            .unwrap();
+        let res = client.transcribe(&[]).await;
+        assert!(matches!(res, Err(AiError::TranscriptionFailed(_))));
+    }
 
     #[test]
     fn test_parse_data_uri_jpeg() {

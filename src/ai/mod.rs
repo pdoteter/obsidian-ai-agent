@@ -84,11 +84,13 @@ impl AiService {
     ) -> Self {
         Self {
             providers,
-            transcription_provider: config
-                .transcription
-                .provider
-                .clone()
-                .unwrap_or_else(|| "openai".to_string()),
+            transcription_provider: config.transcription.provider.clone().unwrap_or_else(|| {
+                if config.ai_provider == "gemini" {
+                    "gemini".to_string()
+                } else {
+                    "openai".to_string()
+                }
+            }),
             classification_provider: config
                 .classification
                 .provider
@@ -366,6 +368,27 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_ai_service_gemini_provider_defaults_transcription_to_gemini() {
+        let mut providers: HashMap<String, Arc<dyn AiProvider>> = HashMap::new();
+        providers.insert(
+            "gemini".to_string(),
+            Arc::new(MockProvider {
+                name: "gemini".to_string(),
+            }),
+        );
+
+        let mut config = Config::default();
+        config.ai_provider = "gemini".to_string();
+
+        let service = AiService::new(providers, &config);
+        assert_eq!(service.transcription_provider, "gemini");
+        assert_eq!(
+            service.transcribe(&[]).await.unwrap(),
+            "transcribed by gemini"
+        );
+    }
+
     #[test]
     fn test_ai_service_from_yaml() {
         let _yaml = r#"
@@ -388,9 +411,6 @@ ai:
                 name: "whisper-specific".to_string(),
             }),
         );
-
-        // Simulate Config loading (ignoring env vars for this unit test by using serde_yml directly on FileConfig if possible,
-        // but Config::load is better if we can mock env. Actually, let's just test the logic that maps Config to AiService.)
 
         let mut config = Config::default();
         config.ai_provider = "global".to_string();
