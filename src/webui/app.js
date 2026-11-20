@@ -260,15 +260,15 @@ document.addEventListener("DOMContentLoaded", () => {
         // Escape HTML tags to prevent XSS
         html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-        // Restore blockquotes after escape
-        html = html.replace(/^&gt;\s*(.*)$/gm, "<blockquote>$1</blockquote>");
+        // Restore blockquotes after escape (including indented URL TODO summaries)
+        html = html.replace(/^\s*&gt;\s*(.*)$/gm, "<blockquote>$1</blockquote>");
         // Combine nested blockquotes
         html = html.replace(/<\/blockquote>\n<blockquote>/g, "<br>");
 
-        // Headers
-        html = html.replace(/^#\s*(.*)$/gm, "<h1>$1</h1>");
-        html = html.replace(/^##\s*(.*)$/gm, "<h2>$1</h2>");
-        html = html.replace(/^###\s*(.*)$/gm, "<h3>$1</h3>");
+        // Headers (match longest prefix first and require whitespace so #tags are preserved)
+        html = html.replace(/^###\s+(.*)$/gm, "<h3>$1</h3>");
+        html = html.replace(/^##\s+(.*)$/gm, "<h2>$1</h2>");
+        html = html.replace(/^#\s+(.*)$/gm, "<h1>$1</h1>");
 
         // Completed Todos
         html = html.replace(/^-\s*\[x\]\s*(.*)$/gm, '<li><input type="checkbox" checked disabled> <span class="strikethrough">$1</span></li>');
@@ -292,6 +292,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Render general wikilinks: [[link]] -> link text
         html = html.replace(/\[\[(.*?)\]\]/g, '<span class="wikilink">$1</span>');
 
+        // Render Markdown HTTP(S) links safely: [title](https://...)
+        html = html.replace(/\[([^\[\]]+)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="note-link">$1</a>');
+
         // Wrap list items nicely
         html = html.replace(/(<li>.*?<\/li>)/g, '<ul class="note-list">$1</ul>');
         html = html.replace(/<\/ul>\n<ul class="note-list">/g, ""); // Collapse adjacent lists
@@ -312,7 +315,17 @@ document.addEventListener("DOMContentLoaded", () => {
         messageInput.style.height = "auto";
 
         // Show typing indicator
-        setLoading(true, "AI is processing note...");
+        let loadingMsg = "AI is processing note...";
+        if (!activeFile && /https?:\/\//i.test(messageText)) {
+            const isYt = /(youtube\.com|youtu\.be)/i.test(messageText);
+            const wantsTranscript = /transcript/i.test(messageText);
+            if (isYt && wantsTranscript) {
+                loadingMsg = "Fetching & summarizing YouTube transcript...";
+            } else {
+                loadingMsg = "Fetching & summarizing link...";
+            }
+        }
+        setLoading(true, loadingMsg);
 
         try {
             if (activeFile) {
@@ -419,17 +432,17 @@ document.addEventListener("DOMContentLoaded", () => {
                         responseMsg = `✅ **Task Created** under **Todo** category!\n*Summary*: "${data.summary}"\n*Tags*: ${data.tags.map(t => `#${t}`).join(" ") || "None"}`;
                     } else if (data.category === "note") {
                         responseMsg = `📝 **Note Captured** and categorized successfully.\n*Summary*: "${data.summary}"\n*Tags*: ${data.tags.map(t => `#${t}`).join(" ") || "None"}`;
-                    } else if (data.category === "command") {
+                    } else if (data.category === "command" || data.category === "url") {
                         responseMsg = data.summary;
                     } else {
                         responseMsg = `👍 **Log Appended** as raw entry to your daily notes list.\n*Summary*: "${data.summary}"`;
                     }
                     
-                    if (data.category !== "command" && !data.ai_success) {
+                    if (data.category !== "command" && data.category !== "url" && !data.ai_success) {
                         responseMsg = `📝 **Appended Raw Entry** (AI classification failed or returned raw fallback).\n*Entry*: "${data.summary}"`;
                     }
 
-                    appendBotMessage(responseMsg);
+                    appendBotMessage(responseMsg, data.transcript_actions || []);
                     fetchCurrentNote();
                 } else {
                     throw new Error(await res.text() || "Failed to process message");
@@ -597,26 +610,109 @@ document.addEventListener("DOMContentLoaded", () => {
         scrollToBottom();
     }
 
-    function appendBotMessage(markdown) {
+    function appendBotMessage(markdown, transcriptActions = []) {
         const bubble = document.createElement("div");
         bubble.className = "msg-bubble bot";
         
-        // Simple parser for chat responses
-        let text = markdown;
+        // Escape HTML first to prevent XSS from untrusted external page/video titles,
+        // then apply lightweight Markdown formatting for chat responses.
+        let text = escapeHTML(markdown);
         text = text.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
         text = text.replace(/\*(.*?)\*/g, "<em>$1</em>");
         text = text.replace(/`(.*?)`/g, "<code>$1</code>");
         text = text.replace(/\n/g, "<br>");
 
-        bubble.innerHTML = `
-            <div class="msg-content">
-                <p>${text}</p>
-                <div class="msg-meta">${getFormattedTime()}</div>
-            </div>
-        `;
-        
+        const contentEl = document.createElement("div");
+        contentEl.className = "msg-content";
+
+        const p = document.createElement("p");
+        p.innerHTML = text;
+        contentEl.appendChild(p);
+
+        if (Array.isArray(transcriptActions) && transcriptActions.length > 0) {
+            const actionsWrap = document.createElement("div");
+            actionsWrap.className = "msg-actions";
+
+            transcriptActions.forEach((action) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "transcript-action-btn";
+                btn.dataset.transcriptId = action.id;
+
+                const shortTitle = action.title && action.title.length > 36
+                    ? action.title.slice(0, 36) + "…"
+                    : (action.title || action.video_id);
+                const label = transcriptActions.length === 1
+                    ? "📝 Full Transcript"
+                    : `📝 Full Transcript: ${shortTitle}`;
+                btn.textContent = label;
+
+                btn.addEventListener("click", () => handleTranscriptRequest(action, btn, label));
+                actionsWrap.appendChild(btn);
+            });
+
+            contentEl.appendChild(actionsWrap);
+        }
+
+        const metaEl = document.createElement("div");
+        metaEl.className = "msg-meta";
+        metaEl.textContent = getFormattedTime();
+        contentEl.appendChild(metaEl);
+
+        bubble.appendChild(contentEl);
         chatMessages.appendChild(bubble);
         scrollToBottom();
+    }
+
+    async function handleTranscriptRequest(action, button, originalLabel) {
+        button.disabled = true;
+        button.classList.add("loading");
+        button.textContent = "⏳ Fetching transcript...";
+        setLoading(true, "Fetching & formatting YouTube transcript...");
+
+        try {
+            const res = await fetch("/api/transcript", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ id: action.id })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                button.classList.remove("loading");
+                button.classList.add("completed");
+                button.textContent = "✅ Transcript Saved";
+
+                const tagsText = data.tags && data.tags.length > 0
+                    ? `\n*Tags*: ${data.tags.map(t => `#${t}`).join(" ")}`
+                    : "";
+                appendBotMessage(
+                    `✅ **YouTube Transcript Saved!**\n**Title**: ${data.title}\n*Transcript*: \`${data.wiki_link}\`\n*Summary*: "${data.summary}"${tagsText}`
+                );
+                fetchCurrentNote();
+            } else {
+                const errText = await res.text();
+                button.classList.remove("loading");
+                if (res.status === 404) {
+                    button.textContent = "❌ Request Expired";
+                } else {
+                    button.disabled = false;
+                    button.textContent = `🔄 Retry (${originalLabel.replace(/^📝\s*/, "")})`;
+                }
+                appendSystemMessage(`❌ ${errText || "Failed to fetch YouTube transcript"}`);
+            }
+        } catch (err) {
+            console.error("Transcript request failed:", err);
+            button.classList.remove("loading");
+            button.disabled = false;
+            button.textContent = `🔄 Retry (${originalLabel.replace(/^📝\s*/, "")})`;
+            appendSystemMessage(`❌ Transcript request failed: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
     }
 
     function appendSystemMessage(text) {

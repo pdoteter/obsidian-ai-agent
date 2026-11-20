@@ -40,6 +40,7 @@ pub struct WebuiState {
     pub vault: Arc<DailyNoteManager>,
     pub sync_notifier: Option<debounce::SyncNotifier>,
     pub ws_broadcast: broadcast::Sender<WebuiEvent>,
+    pub transcript_pending: crate::handlers::url::TranscriptPending,
 }
 
 /// Start the concurrent Axum WebUI/API server
@@ -71,6 +72,7 @@ pub async fn start_server(state: WebuiState, port: u16) {
         // Authenticated endpoints
         .route("/api/note", get(get_daily_note))
         .route("/api/message", post(post_text_message))
+        .route("/api/transcript", post(post_transcript_request))
         .route("/api/photo", post(post_photo_message))
         .route("/api/voice", post(post_voice_message))
         .route("/api/pdf", post(post_pdf_message))
@@ -290,6 +292,20 @@ struct TextMessageResponse {
     summary: String,
     tags: Vec<String>,
     ai_success: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    transcript_actions: Vec<crate::handlers::url::PendingTranscriptAction>,
+}
+
+impl TextMessageResponse {
+    fn command(summary: impl Into<String>) -> Self {
+        Self {
+            category: "command".to_string(),
+            summary: summary.into(),
+            tags: Vec::new(),
+            ai_success: true,
+            transcript_actions: Vec::new(),
+        }
+    }
 }
 
 async fn post_text_message(
@@ -305,26 +321,16 @@ async fn post_text_message(
     if text == "/git_refresh" {
         if let Some(ref notifier) = state.sync_notifier {
             if notifier.is_busy() {
-                let response = TextMessageResponse {
-                    category: "command".to_string(),
-                    summary:
-                        "⏳ Git operation is already in progress. Please try again in a moment."
-                            .to_string(),
-                    tags: Vec::new(),
-                    ai_success: true,
-                };
+                let response = TextMessageResponse::command(
+                    "⏳ Git operation is already in progress. Please try again in a moment.",
+                );
                 return (StatusCode::OK, Json(response)).into_response();
             }
 
             let Ok(_git_guard) = notifier.git_lock.try_lock() else {
-                let response = TextMessageResponse {
-                    category: "command".to_string(),
-                    summary:
-                        "⏳ Git lock is currently held by another operation. Please try again."
-                            .to_string(),
-                    tags: Vec::new(),
-                    ai_success: true,
-                };
+                let response = TextMessageResponse::command(
+                    "⏳ Git lock is currently held by another operation. Please try again.",
+                );
                 return (StatusCode::OK, Json(response)).into_response();
             };
 
@@ -335,83 +341,54 @@ async fn post_text_message(
 
             match result {
                 Ok(crate::git::sync::SyncResult::NothingToSync) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: "✅ Git sync completed: Nothing to sync.".to_string(),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response =
+                        TextMessageResponse::command("✅ Git sync completed: Nothing to sync.");
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Ok(crate::git::sync::SyncResult::Pushed) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: "✅ Git sync completed: Local changes pushed to remote."
-                            .to_string(),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response = TextMessageResponse::command(
+                        "✅ Git sync completed: Local changes pushed to remote.",
+                    );
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Ok(crate::git::sync::SyncResult::PushedWithoutFetch) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: "✅ Git sync completed: Pushed without fetch (remote offline)."
-                            .to_string(),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response = TextMessageResponse::command(
+                        "✅ Git sync completed: Pushed without fetch (remote offline).",
+                    );
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Ok(crate::git::sync::SyncResult::RebasedAndPushed) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: "✅ Git sync completed: Rebased local changes on top of remote and pushed successfully.".to_string(),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response = TextMessageResponse::command(
+                        "✅ Git sync completed: Rebased local changes on top of remote and pushed successfully.",
+                    );
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Ok(crate::git::sync::SyncResult::ConflictDetected(info)) => {
                     let files_list = info.files.join(", ");
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: format!("⚠️ Git sync failed: Conflict detected in file(s): **{}**. Please resolve using Telegram or force refresh using `/git_force_refresh`.", files_list),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response = TextMessageResponse::command(format!(
+                        "⚠️ Git sync failed: Conflict detected in file(s): **{}**. Please resolve using Telegram or force refresh using `/git_force_refresh`.",
+                        files_list
+                    ));
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Err(e) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: format!("❌ Git sync failed: {}", e),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response =
+                        TextMessageResponse::command(format!("❌ Git sync failed: {}", e));
                     return (StatusCode::OK, Json(response)).into_response();
                 }
             }
         } else {
-            let response = TextMessageResponse {
-                category: "command".to_string(),
-                summary: "⚠️ Git synchronization is disabled in configuration.".to_string(),
-                tags: Vec::new(),
-                ai_success: true,
-            };
+            let response = TextMessageResponse::command(
+                "⚠️ Git synchronization is disabled in configuration.",
+            );
             return (StatusCode::OK, Json(response)).into_response();
         }
     } else if text == "/git_force_refresh" {
         if let Some(ref notifier) = state.sync_notifier {
             if notifier.is_busy() {
-                let response = TextMessageResponse {
-                    category: "command".to_string(),
-                    summary:
-                        "⏳ Git operation is already in progress. Please try again in a moment."
-                            .to_string(),
-                    tags: Vec::new(),
-                    ai_success: true,
-                };
+                let response = TextMessageResponse::command(
+                    "⏳ Git operation is already in progress. Please try again in a moment.",
+                );
                 return (StatusCode::OK, Json(response)).into_response();
             }
 
@@ -420,33 +397,68 @@ async fn post_text_message(
                     // Push updated daily note to all WebSockets because force refresh might have overwritten today's note!
                     broadcast_note_update(&state).await;
 
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: "✅ Force refresh completed successfully. The agent vault is now aligned with the latest remote version!".to_string(),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response = TextMessageResponse::command(
+                        "✅ Force refresh completed successfully. The agent vault is now aligned with the latest remote version!",
+                    );
                     return (StatusCode::OK, Json(response)).into_response();
                 }
                 Err(e) => {
-                    let response = TextMessageResponse {
-                        category: "command".to_string(),
-                        summary: format!("❌ Force refresh failed: {}", e),
-                        tags: Vec::new(),
-                        ai_success: true,
-                    };
+                    let response =
+                        TextMessageResponse::command(format!("❌ Force refresh failed: {}", e));
                     return (StatusCode::OK, Json(response)).into_response();
                 }
             }
         } else {
-            let response = TextMessageResponse {
-                category: "command".to_string(),
-                summary: "⚠️ Git synchronization is disabled in configuration.".to_string(),
-                tags: Vec::new(),
-                ai_success: true,
-            };
+            let response = TextMessageResponse::command(
+                "⚠️ Git synchronization is disabled in configuration.",
+            );
             return (StatusCode::OK, Json(response)).into_response();
         }
+    }
+
+    // Check for URLs (including YouTube links and keyword-triggered YouTube transcripts)
+    let detected_urls = crate::url::detect::detect_urls(text);
+    if !detected_urls.is_empty() {
+        let surrounding_text = if detected_urls.iter().all(|u| text == u.url) {
+            None
+        } else {
+            Some(text)
+        };
+
+        let batch = crate::handlers::url::process_url_entries(
+            detected_urls,
+            surrounding_text,
+            text,
+            &state.config,
+            &state.ai_service,
+            &state.vault,
+            state.sync_notifier.as_ref(),
+            &state.transcript_pending,
+        )
+        .await;
+
+        if batch.success_count > 0 {
+            broadcast_note_update(&state).await;
+        }
+
+        let summary = crate::handlers::url::format_webui_url_summary(&batch);
+        let mut tags = Vec::new();
+        for outcome in &batch.outcomes {
+            for tag in &outcome.tags {
+                if !tags.contains(tag) {
+                    tags.push(tag.clone());
+                }
+            }
+        }
+
+        let response = TextMessageResponse {
+            category: "url".to_string(),
+            summary,
+            tags,
+            ai_success: batch.success_count > 0,
+            transcript_actions: batch.transcript_actions,
+        };
+        return (StatusCode::OK, Json(response)).into_response();
     }
 
     // Process text message through extracted text handler
@@ -469,6 +481,7 @@ async fn post_text_message(
                 summary: classified.summary,
                 tags: classified.tags,
                 ai_success,
+                transcript_actions: Vec::new(),
             };
             (StatusCode::OK, Json(response)).into_response()
         }
@@ -477,6 +490,80 @@ async fn post_text_message(
             format!("Failed to process note: {}", e),
         )
             .into_response(),
+    }
+}
+
+// 2b. POST /api/transcript - Fetch & save full YouTube transcript for a pending action
+#[derive(Deserialize)]
+struct TranscriptActionRequest {
+    id: String,
+}
+
+#[derive(Serialize)]
+struct TranscriptActionResponse {
+    title: String,
+    summary: String,
+    tags: Vec<String>,
+    wiki_link: String,
+}
+
+async fn post_transcript_request(
+    headers: HeaderMap,
+    State(state): State<WebuiState>,
+    Json(payload): Json<TranscriptActionRequest>,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.config) {
+        return (status, "Unauthorized").into_response();
+    }
+
+    let request = {
+        let mut pending = state.transcript_pending.lock().await;
+        pending.remove(&payload.id)
+    };
+
+    let request = match request {
+        Some(req) => req,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                "Transcript request expired or not found. Please resend the YouTube link.",
+            )
+                .into_response();
+        }
+    };
+
+    match crate::handlers::url::process_transcript_request(
+        &request,
+        &state.config,
+        &state.ai_service,
+        &state.vault,
+        state.sync_notifier.as_ref(),
+        true,
+    )
+    .await
+    {
+        Ok(result) => {
+            broadcast_note_update(&state).await;
+            (
+                StatusCode::OK,
+                Json(TranscriptActionResponse {
+                    title: result.title,
+                    summary: result.summary,
+                    tags: result.tags,
+                    wiki_link: result.wiki_link,
+                }),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            // Re-insert request so the user can retry on transient errors
+            state
+                .transcript_pending
+                .lock()
+                .await
+                .insert(payload.id, request);
+            (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
+        }
     }
 }
 
@@ -820,4 +907,334 @@ async fn handle_ws_session(socket: WebSocket, state: WebuiState) {
     }
 
     info!("WebSocket session closed cleanly");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
+
+    async fn build_test_state(auth_token: Option<&str>) -> WebuiState {
+        let config = Config {
+            vault_path: std::env::temp_dir()
+                .join(format!("obsidian_webui_test_{}", uuid::Uuid::new_v4())),
+            webui_auth_token: auth_token.map(|t| t.to_string()),
+            ..Default::default()
+        };
+
+        let ai_service = Arc::new(AiService::new(HashMap::new(), &config));
+        let vault = Arc::new(
+            DailyNoteManager::new(
+                config.vault_path.clone(),
+                config.date_display_format.clone(),
+                None,
+                None,
+            )
+            .await,
+        );
+        let (ws_broadcast, _) = broadcast::channel(16);
+        let transcript_pending = Arc::new(Mutex::new(HashMap::new()));
+
+        WebuiState {
+            config: Arc::new(config),
+            ai_service,
+            vault,
+            sync_notifier: None,
+            ws_broadcast,
+            transcript_pending,
+        }
+    }
+
+    #[test]
+    fn test_text_message_response_omits_empty_transcript_actions() {
+        let resp = TextMessageResponse::command("ok");
+        let json = serde_json::to_value(&resp).unwrap();
+        assert!(json.get("transcript_actions").is_none());
+    }
+
+    #[test]
+    fn test_text_message_response_serializes_transcript_actions() {
+        let resp = TextMessageResponse {
+            category: "url".to_string(),
+            summary: "Saved 1 URL(s)".to_string(),
+            tags: vec!["youtube".to_string()],
+            ai_success: true,
+            transcript_actions: vec![crate::handlers::url::PendingTranscriptAction {
+                id: "abcd1234".to_string(),
+                video_id: "dQw4w9WgXcQ".to_string(),
+                url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+                title: "Never Gonna Give You Up".to_string(),
+            }],
+        };
+
+        let json = serde_json::to_value(&resp).unwrap();
+        let actions = json["transcript_actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["id"], "abcd1234");
+        assert_eq!(actions[0]["video_id"], "dQw4w9WgXcQ");
+    }
+
+    #[tokio::test]
+    async fn test_post_transcript_request_requires_auth() {
+        let state = build_test_state(Some("secret-token")).await;
+        let headers = HeaderMap::new();
+
+        let resp = post_transcript_request(
+            headers,
+            State(state),
+            Json(TranscriptActionRequest {
+                id: "missing".to_string(),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_post_transcript_request_not_found_for_expired_id() {
+        let state = build_test_state(Some("secret-token")).await;
+        let vault_path = state.config.vault_path.clone();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            axum::http::HeaderValue::from_static("Bearer secret-token"),
+        );
+
+        let resp = post_transcript_request(
+            headers,
+            State(state),
+            Json(TranscriptActionRequest {
+                id: "nonexistent".to_string(),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let _ = tokio::fs::remove_dir_all(&vault_path).await;
+    }
+
+    struct MockWebuiAiProvider;
+
+    #[async_trait::async_trait]
+    impl crate::ai::AiProvider for MockWebuiAiProvider {
+        async fn classify_text(
+            &self,
+            _text: &str,
+            _model: &str,
+            _guide: Option<&str>,
+        ) -> Result<crate::ai::classify::ClassifiedNote, crate::error::AiError> {
+            Ok(crate::ai::classify::ClassifiedNote {
+                category: crate::ai::classify::NoteCategory::Log,
+                markdown: "- mock".to_string(),
+                tags: vec![],
+                summary: "mock".to_string(),
+                frontmatter: None,
+                date: None,
+            })
+        }
+
+        async fn classify_image(
+            &self,
+            _image_base64: &str,
+            _caption: Option<&str>,
+            _exif_context: &str,
+            _model: &str,
+            _guide: Option<&str>,
+        ) -> Result<crate::ai::classify::ClassifiedNote, crate::error::AiError> {
+            unreachable!()
+        }
+
+        async fn summarize_url(
+            &self,
+            page_content: &crate::url::PageContent,
+            _user_text: Option<&str>,
+            _model: &str,
+            _guide: Option<&str>,
+        ) -> Result<crate::ai::summarize::UrlSummary, crate::error::AiError> {
+            Ok(crate::ai::summarize::UrlSummary {
+                title: page_content
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| "Mock Title".to_string()),
+                summary: "Concise AI summary of page.".to_string(),
+                tags: vec!["reading".to_string(), "webui".to_string()],
+            })
+        }
+
+        async fn transcribe(&self, _audio_bytes: &[u8]) -> Result<String, crate::error::AiError> {
+            unreachable!()
+        }
+
+        async fn format_transcript(
+            &self,
+            raw_transcript: &str,
+            _video_title: &str,
+            _model: &str,
+        ) -> Result<String, crate::error::AiError> {
+            Ok(format!("### Formatted\n\n{}", raw_transcript))
+        }
+
+        async fn chat_completion(
+            &self,
+            _model: &str,
+            _messages: Vec<crate::ai::ChatMessage>,
+            _max_tokens: Option<u32>,
+        ) -> Result<String, crate::error::AiError> {
+            unreachable!()
+        }
+
+        async fn transcribe_pdf(
+            &self,
+            _pdf_bytes: &[u8],
+            _user_prompt: Option<&str>,
+            _model: &str,
+        ) -> Result<crate::ai::classify::ClassifiedNote, crate::error::AiError> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_text_message_url_pipeline_writes_todo_to_daily_note() {
+        // Spin up a tiny local HTTP server serving a test HTML page
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_handle = tokio::spawn(async move {
+            let app = Router::new().route(
+                "/article",
+                get(|| async {
+                    Html("<html><head><title>Rust WebUI Guide</title></head><body><p>Wiring URL processing into WebUI.</p></body></html>")
+                }),
+            );
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let vault_path =
+            std::env::temp_dir().join(format!("obsidian_webui_url_test_{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&vault_path).await.unwrap();
+
+        let config = Config {
+            vault_path: vault_path.clone(),
+            ai_provider: "mock".to_string(),
+            webui_auth_token: Some("test-secret".to_string()),
+            ..Default::default()
+        };
+
+        let mut providers: HashMap<String, Arc<dyn crate::ai::AiProvider>> = HashMap::new();
+        providers.insert("mock".to_string(), Arc::new(MockWebuiAiProvider));
+        let ai_service = Arc::new(AiService::new(providers, &config));
+        let vault = Arc::new(
+            DailyNoteManager::new(
+                config.vault_path.clone(),
+                config.date_display_format.clone(),
+                None,
+                None,
+            )
+            .await,
+        );
+        let (ws_broadcast, mut ws_rx) = broadcast::channel(16);
+        let state = WebuiState {
+            config: Arc::new(config),
+            ai_service,
+            vault: vault.clone(),
+            sync_notifier: None,
+            ws_broadcast,
+            transcript_pending: Arc::new(Mutex::new(HashMap::new())),
+        };
+
+        let url = format!("http://{}/article", addr);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            axum::http::HeaderValue::from_static("Bearer test-secret"),
+        );
+
+        let resp = post_text_message(
+            headers,
+            State(state),
+            Json(TextMessageRequest {
+                text: format!("Read this later {}", url),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["category"], "url");
+        assert_eq!(json["ai_success"], true);
+        assert!(json["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Rust WebUI Guide"));
+
+        // Verify Daily Note was written and WebSocket update was broadcast
+        let note_path = vault.ensure_today().await.unwrap();
+        let note_content = tokio::fs::read_to_string(&note_path).await.unwrap();
+        assert!(note_content.contains("## ✅ Todos"));
+        assert!(note_content.contains(&format!("[Rust WebUI Guide]({})", url)));
+        assert!(note_content.contains("Concise AI summary of page."));
+        assert!(note_content.contains("#reading #webui"));
+
+        let ws_event = ws_rx
+            .try_recv()
+            .expect("Expected WebSocket NoteUpdate broadcast");
+        match ws_event {
+            WebuiEvent::NoteUpdate { content, .. } => {
+                assert!(content.contains(&url));
+            }
+        }
+
+        server_handle.abort();
+        let _ = tokio::fs::remove_dir_all(&vault_path).await;
+    }
+
+    #[tokio::test]
+    async fn test_post_transcript_request_reinserts_pending_entry_on_failure() {
+        let state = build_test_state(Some("secret-token")).await;
+        let vault_path = state.config.vault_path.clone();
+
+        // Insert a pending transcript request with an invalid video ID so fetch_transcript fails fast
+        state.transcript_pending.lock().await.insert(
+            "retry123".to_string(),
+            crate::handlers::url::TranscriptRequest {
+                video_id: "invalid".to_string(),
+                url: "https://youtube.com/watch?v=invalid".to_string(),
+                title: "Invalid Test Video".to_string(),
+            },
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            axum::http::HeaderValue::from_static("Bearer secret-token"),
+        );
+
+        let resp = post_transcript_request(
+            headers,
+            State(state.clone()),
+            Json(TranscriptActionRequest {
+                id: "retry123".to_string(),
+            }),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Pending request should be re-inserted so user can retry
+        assert!(state
+            .transcript_pending
+            .lock()
+            .await
+            .contains_key("retry123"));
+
+        let _ = tokio::fs::remove_dir_all(&vault_path).await;
+    }
 }

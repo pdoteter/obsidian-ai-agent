@@ -335,6 +335,37 @@ body {
     color: var(--accent-indigo);
 }
 
+.markdown-preview h3 {
+    font-family: var(--font-outfit);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 14px 0 6px 0;
+    color: #c4b5fd;
+}
+
+.markdown-preview a.note-link {
+    color: var(--accent-cyan);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(6, 182, 212, 0.35);
+    transition: var(--transition-smooth);
+}
+
+.markdown-preview a.note-link:hover {
+    color: #67e8f9;
+    border-bottom-color: #67e8f9;
+}
+
+.markdown-preview .wikilink {
+    display: inline-block;
+    background: rgba(139, 92, 246, 0.14);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: #c4b5fd;
+    padding: 1px 7px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
 .markdown-preview ul, .markdown-preview ol {
     margin: 0 0 16px 20px;
 }
@@ -503,6 +534,51 @@ body {
     color: var(--text-muted);
     margin-top: 4px;
     text-align: right;
+}
+
+/* Inline Chat Action Buttons (e.g., Full YouTube Transcript) */
+.msg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.transcript-action-btn {
+    padding: 8px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(139, 92, 246, 0.35);
+    background: rgba(139, 92, 246, 0.14);
+    color: var(--text-primary);
+    font-family: var(--font-inter);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: var(--transition-smooth);
+}
+
+.transcript-action-btn:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.28);
+    border-color: rgba(139, 92, 246, 0.65);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+}
+
+.transcript-action-btn:disabled {
+    opacity: 0.7;
+    cursor: default;
+}
+
+.transcript-action-btn.completed {
+    background: rgba(16, 185, 129, 0.14);
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #6ee7b7;
+    opacity: 1;
 }
 
 /* Media Preview Bar */

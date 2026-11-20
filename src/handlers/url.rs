@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::Serialize;
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, ChatAction, InlineKeyboardButton, InlineKeyboardMarkup};
 use tokio::sync::Mutex;
@@ -26,6 +27,411 @@ pub struct TranscriptRequest {
 }
 
 pub type TranscriptPending = Arc<Mutex<HashMap<String, TranscriptRequest>>>;
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct PendingTranscriptAction {
+    pub id: String,
+    pub video_id: String,
+    pub url: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct TranscriptResult {
+    pub title: String,
+    pub summary: String,
+    pub tags: Vec<String>,
+    pub wiki_link: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct UrlItemOutcome {
+    pub url: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub tags: Vec<String>,
+    pub success: bool,
+    pub transcript_wiki_link: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UrlBatchResult {
+    pub total_urls: usize,
+    pub processed_count: usize,
+    pub success_count: usize,
+    pub truncated: bool,
+    pub max_urls: usize,
+    pub outcomes: Vec<UrlItemOutcome>,
+    pub transcript_actions: Vec<PendingTranscriptAction>,
+}
+
+/// Fetch YouTube title via oEmbed with graceful fallback to the raw URL.
+async fn fetch_youtube_title(detected_url: &DetectedUrl, config: &Config) -> String {
+    match fetch_youtube_metadata(&detected_url.url, config.url.fetch_timeout_secs).await {
+        Ok(metadata) => metadata.title,
+        Err(e) => {
+            warn!(
+                error = %e,
+                url = %detected_url.url,
+                "Failed to fetch YouTube metadata for transcript, falling back to URL as title"
+            );
+            detected_url.url.clone()
+        }
+    }
+}
+
+/// Shared YouTube transcript processing pipeline for both Telegram and WebUI:
+/// fetch VTT captions via yt-dlp -> AI summarize -> AI format -> save transcript note ->
+/// update/append Daily Note entry -> notify git sync.
+pub async fn process_transcript_request(
+    request: &TranscriptRequest,
+    config: &Config,
+    ai_service: &AiService,
+    vault: &DailyNoteManager,
+    sync_notifier: Option<&SyncNotifier>,
+    replace_existing: bool,
+) -> Result<TranscriptResult, String> {
+    let transcript_text = crate::url::fetch_transcript(&request.video_id)
+        .await
+        .map_err(|e| {
+            error!(error = %e, video_id = %request.video_id, "Failed to fetch transcript");
+            format!("Failed to fetch transcript: {}", e)
+        })?;
+
+    let page_content = PageContent {
+        title: Some(request.title.clone()),
+        description: Some("YouTube video transcript".to_string()),
+        body_text: transcript_text.clone(),
+        url: request.url.clone(),
+    };
+
+    let guide = crate::ai::guide::load_guide(&config.guide_path).await;
+    let summary = ai_service
+        .summarize_url(
+            &page_content,
+            None,
+            &config.openrouter_model_classify,
+            guide.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            error!(error = %e, url = %request.url, "Failed to summarize transcript");
+            format!("Failed to summarize transcript: {}", e)
+        })?;
+
+    // Format transcript with AI before saving (graceful fallback to raw text)
+    let formatted_transcript = match ai_service
+        .format_transcript(
+            &transcript_text,
+            &request.title,
+            &config.openrouter_model_classify,
+        )
+        .await
+    {
+        Ok(formatted) => formatted,
+        Err(e) => {
+            warn!(error = %e, "Failed to format transcript, using raw text");
+            transcript_text.clone()
+        }
+    };
+
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let transcript_file = crate::vault::save_transcript(
+        std::path::Path::new(&config.vault_path),
+        &config.url.transcript_folder,
+        &request.video_id,
+        &request.title,
+        &summary.summary,
+        &formatted_transcript,
+        &date,
+    )
+    .await
+    .map_err(|e| {
+        error!(error = %e, video_id = %request.video_id, "Failed to save transcript");
+        format!("Failed to save transcript: {}", e)
+    })?;
+
+    let (section, content) = writer::format_url_todo(
+        &request.url,
+        Some(&summary.title),
+        Some(&summary.summary),
+        &summary.tags,
+        Some(&transcript_file.wiki_link),
+        Some(&request.title),
+    );
+
+    if replace_existing {
+        if let Err(e) = vault
+            .replace_entry_by_url(section, &request.url, &content)
+            .await
+        {
+            warn!(error = %e, section, url = %request.url, "Failed to replace entry in daily note");
+        }
+    } else if let Err(e) = vault.append_to_section(section, &content).await {
+        warn!(error = %e, section, url = %request.url, "Failed to append transcript entry to daily note");
+    }
+
+    if let Some(notifier) = sync_notifier {
+        notifier.notify();
+    }
+
+    Ok(TranscriptResult {
+        title: summary.title,
+        summary: summary.summary,
+        tags: summary.tags,
+        wiki_link: transcript_file.wiki_link,
+    })
+}
+
+/// Shared URL processing pipeline for WebUI (handles regular web pages, YouTube fast-mode
+/// with pending on-demand transcript actions, and keyword-triggered direct YouTube transcripts).
+#[allow(clippy::too_many_arguments)]
+pub async fn process_url_entries(
+    urls: Vec<DetectedUrl>,
+    surrounding_text: Option<&str>,
+    raw_text: &str,
+    config: &Config,
+    ai_service: &AiService,
+    vault: &DailyNoteManager,
+    sync_notifier: Option<&SyncNotifier>,
+    transcript_pending: &TranscriptPending,
+) -> UrlBatchResult {
+    let max_urls = config.url.max_urls_per_message;
+    let total_urls = urls.len();
+    let (urls_to_process, truncated) = enforce_url_limit(urls, max_urls);
+    let processed_count = urls_to_process.len();
+
+    let mut success_count = 0usize;
+    let mut outcomes = Vec::new();
+    let mut transcript_actions = Vec::new();
+
+    for detected_url in &urls_to_process {
+        let is_transcript_direct_flow = match &detected_url.url_type {
+            UrlType::YouTube { .. } => {
+                crate::url::is_transcript_request(surrounding_text.unwrap_or(raw_text))
+            }
+            UrlType::WebPage => false,
+        };
+
+        if is_transcript_direct_flow {
+            if let UrlType::YouTube { video_id } = &detected_url.url_type {
+                let video_title = fetch_youtube_title(detected_url, config).await;
+                let request = TranscriptRequest {
+                    video_id: video_id.clone(),
+                    url: detected_url.url.clone(),
+                    title: video_title.clone(),
+                };
+
+                match process_transcript_request(&request, config, ai_service, vault, None, false)
+                    .await
+                {
+                    Ok(transcript_result) => {
+                        success_count += 1;
+                        outcomes.push(UrlItemOutcome {
+                            url: detected_url.url.clone(),
+                            title: Some(video_title),
+                            summary: Some(transcript_result.summary),
+                            tags: transcript_result.tags,
+                            success: true,
+                            transcript_wiki_link: Some(transcript_result.wiki_link),
+                            error: None,
+                        });
+                    }
+                    Err(err_msg) => {
+                        outcomes.push(UrlItemOutcome {
+                            url: detected_url.url.clone(),
+                            title: Some(video_title),
+                            summary: None,
+                            tags: Vec::new(),
+                            success: false,
+                            transcript_wiki_link: None,
+                            error: Some(err_msg),
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Normal fast-mode flow for non-transcript URLs
+        let fetched_page = fetch_for_url_type(detected_url, config).await;
+
+        let raw_youtube_title = if let Ok(page_content) = &fetched_page {
+            if matches!(detected_url.url_type, UrlType::YouTube { .. }) {
+                page_content.title.clone()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let (title_for_todo, summary_for_todo, tags_for_todo) = match fetched_page {
+            Ok(page_content) => {
+                let fetched_title = page_content.title.clone();
+
+                if let UrlType::YouTube { video_id } = &detected_url.url_type {
+                    let uuid_str = Uuid::new_v4().to_string();
+                    let short_id = crate::utils::safe_truncate(&uuid_str, 8).to_string();
+                    let title_for_request = fetched_title
+                        .clone()
+                        .unwrap_or_else(|| detected_url.url.clone());
+
+                    transcript_pending.lock().await.insert(
+                        short_id.clone(),
+                        TranscriptRequest {
+                            video_id: video_id.clone(),
+                            url: detected_url.url.clone(),
+                            title: title_for_request.clone(),
+                        },
+                    );
+
+                    transcript_actions.push(PendingTranscriptAction {
+                        id: short_id,
+                        video_id: video_id.clone(),
+                        url: detected_url.url.clone(),
+                        title: title_for_request,
+                    });
+                }
+
+                let guide = crate::ai::guide::load_guide(&config.guide_path).await;
+
+                match ai_service
+                    .summarize_url(
+                        &page_content,
+                        surrounding_text,
+                        &config.openrouter_model_classify,
+                        guide.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(summary) => {
+                        info!(
+                            url = %detected_url.url,
+                            ai_title = %summary.title,
+                            tags_count = summary.tags.len(),
+                            "AI summarized URL"
+                        );
+                        (Some(summary.title), Some(summary.summary), summary.tags)
+                    }
+                    Err(e) => {
+                        error!(error = %e, url = %detected_url.url, "AI summarization failed");
+                        (fetched_title, None, Vec::new())
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = %e, url = %detected_url.url, "Failed to fetch URL content");
+                (None, None, Vec::new())
+            }
+        };
+
+        let video_name = raw_youtube_title.as_deref();
+
+        let (section, content) = writer::format_url_todo(
+            &detected_url.url,
+            title_for_todo.as_deref(),
+            summary_for_todo.as_deref(),
+            &tags_for_todo,
+            None,
+            video_name,
+        );
+
+        match vault.append_to_section(section, &content).await {
+            Ok(_) => {
+                success_count += 1;
+                outcomes.push(UrlItemOutcome {
+                    url: detected_url.url.clone(),
+                    title: title_for_todo,
+                    summary: summary_for_todo,
+                    tags: tags_for_todo,
+                    success: true,
+                    transcript_wiki_link: None,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                error!(error = %e, url = %detected_url.url, "Failed to write URL TODO to vault");
+                outcomes.push(UrlItemOutcome {
+                    url: detected_url.url.clone(),
+                    title: title_for_todo,
+                    summary: summary_for_todo,
+                    tags: tags_for_todo,
+                    success: false,
+                    transcript_wiki_link: None,
+                    error: Some(format!("Failed to write URL TODO to vault: {}", e)),
+                });
+            }
+        }
+    }
+
+    if success_count > 0 {
+        if let Some(notifier) = sync_notifier {
+            notifier.notify();
+        }
+    }
+
+    UrlBatchResult {
+        total_urls,
+        processed_count,
+        success_count,
+        truncated,
+        max_urls,
+        outcomes,
+        transcript_actions,
+    }
+}
+
+/// Format a URL processing batch result into clean Markdown for the WebUI chat bubble.
+pub fn format_webui_url_summary(batch: &UrlBatchResult) -> String {
+    let mut parts = Vec::new();
+
+    let header = if batch.success_count == batch.processed_count {
+        format!("🔗 **Saved {} URL(s) as TODO(s)**", batch.success_count)
+    } else {
+        format!(
+            "🔗 **Saved {}/{} URL(s) as TODO(s)**",
+            batch.success_count, batch.processed_count
+        )
+    };
+    parts.push(header);
+
+    if batch.truncated {
+        parts.push(format!(
+            "⚠️ Message contained {} URLs (max: {}). Only processed first {}.",
+            batch.total_urls, batch.max_urls, batch.max_urls
+        ));
+    }
+
+    for item in &batch.outcomes {
+        let label = item.title.as_deref().unwrap_or(&item.url);
+        if item.success {
+            let mut lines = vec![format!("✅ **{}**", label)];
+            if let Some(ref wiki_link) = item.transcript_wiki_link {
+                lines.push(format!("*Transcript*: `{}`", wiki_link));
+            }
+            if let Some(ref summary) = item.summary {
+                lines.push(format!("*Summary*: \"{}\"", summary));
+            }
+            if !item.tags.is_empty() {
+                let tags_str = item
+                    .tags
+                    .iter()
+                    .map(|t| format!("#{}", t))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                lines.push(format!("*Tags*: {}", tags_str));
+            }
+            parts.push(lines.join("\n"));
+        } else {
+            let reason = item.error.as_deref().unwrap_or("Failed to save URL");
+            parts.push(format!("❌ **{}** — {}", label, reason));
+        }
+    }
+
+    parts.join("\n\n")
+}
 
 /// Handle URLs found in Telegram messages
 ///
@@ -99,115 +505,46 @@ pub async fn handle_url_message(
                 bot.send_message(msg.chat.id, "⏳ Fetching transcript...")
                     .await?;
 
-                let transcript_text = match crate::url::fetch_transcript(video_id).await {
-                    Ok(text) => text,
-                    Err(e) => {
-                        error!(error = %e, video_id = %video_id, "Failed to fetch transcript");
-                        bot.send_message(
-                            msg.chat.id,
-                            format!("❌ Failed to fetch transcript: {}", e),
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
-
-                // Fetch metadata for title
-                let fetched_page = match fetch_for_url_type(detected_url, &config).await {
-                    Ok(page) => page,
-                    Err(e) => {
-                        error!(error = %e, url = %detected_url.url, "Failed to fetch YouTube metadata");
-                        bot.send_message(
-                            msg.chat.id,
-                            format!("❌ Failed to fetch video metadata: {}", e),
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
-
-                let page_content = crate::url::PageContent {
-                    title: fetched_page.title.clone(),
-                    description: Some("YouTube video transcript".to_string()),
-                    body_text: transcript_text.clone(),
+                let video_title = fetch_youtube_title(detected_url, &config).await;
+                let request = TranscriptRequest {
+                    video_id: video_id.clone(),
                     url: detected_url.url.clone(),
+                    title: video_title.clone(),
                 };
 
-                let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-                let summary = match ai_service
-                    .summarize_url(
-                        &page_content,
-                        None,
-                        &config.openrouter_model_classify,
-                        guide.as_deref(),
-                    )
-                    .await
-                {
-                    Ok(s) => s,
-                    Err(e) => {
-                        error!(error = %e, url = %detected_url.url, "Failed to summarize transcript");
-                        bot.send_message(
-                            msg.chat.id,
-                            format!("❌ Failed to summarize transcript: {}", e),
-                        )
-                        .await?;
-                        continue;
-                    }
-                };
-
-                let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-                let video_title = fetched_page
-                    .title
-                    .clone()
-                    .unwrap_or_else(|| detected_url.url.clone());
-
-                let transcript_file = match crate::vault::save_transcript(
-                    std::path::Path::new(&config.vault_path),
-                    &config.url.transcript_folder,
-                    video_id,
-                    &video_title,
-                    &summary.summary,
-                    &transcript_text,
-                    &date,
+                match process_transcript_request(
+                    &request,
+                    &config,
+                    &ai_service,
+                    &vault,
+                    None, // sync_notifier is triggered once after processing all URLs
+                    false,
                 )
                 .await
                 {
-                    Ok(file) => file,
-                    Err(e) => {
-                        error!(error = %e, video_id = %video_id, "Failed to save transcript");
+                    Ok(transcript_result) => {
                         bot.send_message(
                             msg.chat.id,
-                            format!("❌ Failed to save transcript: {}", e),
+                            format!("✅ Transcript saved: {}", transcript_result.wiki_link),
                         )
                         .await?;
-                        continue;
+
+                        success_count += 1;
+                        results.push(format_result_item(
+                            Some(&video_title),
+                            &detected_url.url,
+                            true,
+                        ));
                     }
-                };
-
-                let wiki_link_entry = format!("  - Transcript: {}", transcript_file.wiki_link);
-                if let Err(e) = vault
-                    .append_to_section("## ✅ Todos", &wiki_link_entry)
-                    .await
-                {
-                    warn!(error = %e, "Failed to add transcript wiki-link to daily note");
+                    Err(e) => {
+                        bot.send_message(msg.chat.id, format!("❌ {}", e)).await?;
+                        results.push(format_result_item(
+                            Some(&video_title),
+                            &detected_url.url,
+                            false,
+                        ));
+                    }
                 }
-
-                if let Some(ref notifier) = sync_notifier {
-                    notifier.notify();
-                }
-
-                bot.send_message(
-                    msg.chat.id,
-                    format!("✅ Transcript saved: {}", transcript_file.wiki_link),
-                )
-                .await?;
-
-                success_count += 1;
-                results.push(format_result_item(
-                    Some(&video_title),
-                    &detected_url.url,
-                    true,
-                ));
             }
             continue;
         }
@@ -399,100 +736,27 @@ pub async fn handle_transcript_callback(
         bot.send_message(chat_id, "⏳ Fetching transcript...")
             .await?;
 
-        let transcript_text = match crate::url::fetch_transcript(&request.video_id).await {
-            Ok(text) => text,
-            Err(e) => {
-                bot.send_message(chat_id, format!("❌ Failed to fetch transcript: {}", e))
-                    .await?;
-                return Ok(());
-            }
-        };
-
-        let page_content = crate::url::PageContent {
-            title: Some(request.title.clone()),
-            description: Some("YouTube video transcript".to_string()),
-            body_text: transcript_text.clone(),
-            url: request.url.clone(),
-        };
-
-        let guide = crate::ai::guide::load_guide(&config.guide_path).await;
-        let summary = match ai_service
-            .summarize_url(
-                &page_content,
-                None,
-                &config.openrouter_model_classify,
-                guide.as_deref(),
-            )
-            .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                bot.send_message(chat_id, format!("❌ Failed to summarize transcript: {}", e))
-                    .await?;
-                return Ok(());
-            }
-        };
-
-        // Format transcript with AI before saving
-        let formatted_transcript = match ai_service
-            .format_transcript(
-                &transcript_text,
-                &request.title,
-                &config.openrouter_model_classify,
-            )
-            .await
-        {
-            Ok(formatted) => formatted,
-            Err(e) => {
-                warn!(error = %e, "Failed to format transcript, using raw text");
-                transcript_text.clone()
-            }
-        };
-
-        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let transcript_file = match crate::vault::save_transcript(
-            std::path::Path::new(&config.vault_path),
-            &config.url.transcript_folder,
-            &request.video_id,
-            &request.title,
-            &summary.summary,
-            &formatted_transcript,
-            &date,
+        match process_transcript_request(
+            &request,
+            &config,
+            &ai_service,
+            &vault,
+            sync_notifier.as_ref(),
+            true,
         )
         .await
         {
-            Ok(file) => file,
-            Err(e) => {
-                bot.send_message(chat_id, format!("❌ Failed to save transcript: {}", e))
-                    .await?;
-                return Ok(());
+            Ok(transcript_result) => {
+                bot.send_message(
+                    chat_id,
+                    format!("✅ Transcript saved: {}", transcript_result.wiki_link),
+                )
+                .await?;
             }
-        };
-
-        let (section, content) = crate::vault::writer::format_url_todo(
-            &request.url,
-            Some(&summary.title),
-            Some(&summary.summary),
-            &summary.tags,
-            Some(&transcript_file.wiki_link),
-            Some(&request.title),
-        );
-        if let Err(e) = vault
-            .replace_entry_by_url(section, &request.url, &content)
-            .await
-        {
-            warn!(error = %e, section, url = %request.url, "Failed to replace entry in daily note");
+            Err(e) => {
+                bot.send_message(chat_id, format!("❌ {}", e)).await?;
+            }
         }
-
-        if let Some(ref notifier) = sync_notifier {
-            notifier.notify();
-        }
-
-        bot.send_message(
-            chat_id,
-            format!("✅ Transcript saved: {}", transcript_file.wiki_link),
-        )
-        .await?;
     }
 
     Ok(())
@@ -762,5 +1026,75 @@ mod tests {
         assert_eq!(with_title, "✅ Readable title");
         assert!(with_url.starts_with("❌ https://example.com/path"));
         assert!(with_url.ends_with("(write failed)"));
+    }
+
+    #[test]
+    fn test_format_webui_url_summary_youtube_with_transcript() {
+        let batch = UrlBatchResult {
+            total_urls: 1,
+            processed_count: 1,
+            success_count: 1,
+            truncated: false,
+            max_urls: 5,
+            outcomes: vec![UrlItemOutcome {
+                url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string(),
+                title: Some("Never Gonna Give You Up".to_string()),
+                summary: Some("Classic pop music video.".to_string()),
+                tags: vec!["music".to_string(), "youtube".to_string()],
+                success: true,
+                transcript_wiki_link: Some(
+                    "[[transcripts/2026-11-20-never-gonna-give-you-up]]".to_string(),
+                ),
+                error: None,
+            }],
+            transcript_actions: vec![],
+        };
+
+        let formatted = format_webui_url_summary(&batch);
+        assert!(formatted.contains("Saved 1 URL(s) as TODO(s)"));
+        assert!(formatted.contains("✅ **Never Gonna Give You Up**"));
+        assert!(formatted.contains("[[transcripts/2026-11-20-never-gonna-give-you-up]]"));
+        assert!(formatted.contains("Classic pop music video."));
+        assert!(formatted.contains("#music #youtube"));
+    }
+
+    #[test]
+    fn test_format_webui_url_summary_partial_failure_and_truncation() {
+        let batch = UrlBatchResult {
+            total_urls: 6,
+            processed_count: 2,
+            success_count: 1,
+            truncated: true,
+            max_urls: 2,
+            outcomes: vec![
+                UrlItemOutcome {
+                    url: "https://example.com".to_string(),
+                    title: Some("Example".to_string()),
+                    summary: Some("Example summary".to_string()),
+                    tags: vec![],
+                    success: true,
+                    transcript_wiki_link: None,
+                    error: None,
+                },
+                UrlItemOutcome {
+                    url: "https://youtu.be/dQw4w9WgXcQ".to_string(),
+                    title: Some("Test Video".to_string()),
+                    summary: None,
+                    tags: vec![],
+                    success: false,
+                    transcript_wiki_link: None,
+                    error: Some("Failed to fetch transcript: yt-dlp not found".to_string()),
+                },
+            ],
+            transcript_actions: vec![],
+        };
+
+        let formatted = format_webui_url_summary(&batch);
+        assert!(formatted.contains("Saved 1/2 URL(s) as TODO(s)"));
+        assert!(formatted.contains("Message contained 6 URLs (max: 2)"));
+        assert!(formatted.contains("✅ **Example**"));
+        assert!(
+            formatted.contains("❌ **Test Video** — Failed to fetch transcript: yt-dlp not found")
+        );
     }
 }

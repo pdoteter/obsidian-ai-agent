@@ -326,4 +326,74 @@ startxref
     const dailyNotePreview = page.locator('#daily-note-markdown');
     await expect(dailyNotePreview).toContainText('Schedule doctor appointment');
   });
+
+  test('07 - E2E YouTube URL handling, TODO formatting, and Full Transcript action flow', async ({ page, request }) => {
+    await page.goto('/?token=test_token');
+    await expect(page.locator('#auth-gateway')).toBeHidden();
+
+    const ytUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const inputArea = page.locator('#message-input');
+    await inputArea.fill(ytUrl);
+    await page.locator('#send-btn').click();
+
+    await expect(page.locator('#processing-indicator')).toBeVisible();
+
+    const botResponse = page.locator('.msg-bubble.bot').last();
+    await expect(botResponse).toBeVisible({ timeout: 60000 });
+    await expect(botResponse).toContainText('Saved 1 URL(s) as TODO(s)');
+
+    // Verify inline Full Transcript button is rendered for YouTube URLs
+    const transcriptBtn = botResponse.locator('.transcript-action-btn');
+    await expect(transcriptBtn).toBeVisible();
+    await expect(transcriptBtn).toContainText('Full Transcript');
+
+    // Verify Daily Note preview shows the YouTube entry with clickable link
+    const dailyNotePreview = page.locator('#daily-note-markdown');
+    await expect(dailyNotePreview.locator(`a.note-link[href="${ytUrl}"]`)).toBeVisible();
+
+    // Verify Daily Note on disk contains the formatted YouTube TODO
+    const noteFilePath = getTodayDailyNotePath();
+    const noteContent = fs.readFileSync(noteFilePath, 'utf-8');
+    expect(noteContent).toContain('## ✅ Todos');
+    expect(noteContent).toContain(ytUrl);
+
+    // Click the Full Transcript button and wait for /api/transcript response
+    const transcriptRespPromise = page.waitForResponse(
+      (res) => res.url().endsWith('/api/transcript') && res.request().method() === 'POST',
+      { timeout: 60000 }
+    );
+    await transcriptBtn.click();
+    const transcriptResp = await transcriptRespPromise;
+
+    if (transcriptResp.status() === 200) {
+      // yt-dlp succeeded: verify saved transcript note and Daily Note link update
+      await expect(transcriptBtn).toContainText('Transcript Saved');
+      await expect(page.locator('.msg-bubble.bot').last()).toContainText('YouTube Transcript Saved');
+
+      const updatedNoteContent = fs.readFileSync(noteFilePath, 'utf-8');
+      expect(updatedNoteContent).toContain('[[transcripts/');
+
+      const transcriptsDir = path.join(testVaultPath, 'transcripts');
+      expect(fs.existsSync(transcriptsDir)).toBe(true);
+      const transcriptFiles = fs.readdirSync(transcriptsDir);
+      expect(transcriptFiles.some((f) => f.endsWith('.md'))).toBe(true);
+    } else {
+      // Graceful failure path (e.g., yt-dlp not installed on test host)
+      expect(transcriptResp.status()).toBe(500);
+      await expect(page.locator('.msg-bubble.system').last()).toContainText('Failed to fetch transcript');
+      await expect(transcriptBtn).toContainText('Retry');
+    }
+
+    // Verify auth and 404 handling on /api/transcript directly
+    const unauthResp = await request.post('/api/transcript', {
+      data: { id: 'does-not-exist' },
+    });
+    expect(unauthResp.status()).toBe(401);
+
+    const notFoundResp = await request.post('/api/transcript', {
+      headers: { Authorization: 'Bearer test_token' },
+      data: { id: 'does-not-exist' },
+    });
+    expect(notFoundResp.status()).toBe(404);
+  });
 });

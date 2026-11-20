@@ -198,6 +198,7 @@ async fn main() {
             vault: vault.clone(),
             sync_notifier: sync_notifier.clone(),
             ws_broadcast,
+            transcript_pending: transcript_pending.clone(),
         };
 
         let port = config.webui_port;
